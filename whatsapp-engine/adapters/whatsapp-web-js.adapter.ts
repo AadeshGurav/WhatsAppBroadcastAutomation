@@ -144,6 +144,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           headless: this.config.puppeteer?.headless ?? true,
           args: puppeteerArgs,
           executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+          // The link-preview CDP interceptor + in-page thumbnail upload pipeline
+          // can push individual CDP calls past puppeteer's default 180s protocol
+          // timeout (observed as "Runtime.callFunctionOn timed out" on sends).
+          protocolTimeout: 600_000,
         },
       });
 
@@ -335,36 +339,41 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     // Reset the guard flag so the capture is installed fresh each time.
     if (this.client?.pupPage && options?.linkPreview !== false) {
       try {
-        await this.client.pupPage.evaluate(() => {
-          const mod = (window as any).require('WAWebLinkPreviewChatAction');
-          if (!mod) return;
-          // Reset so we can install a fresh capture
-          (mod as any).__nativePreviewCaptured = false;
-          (window as any).__lastNativePreview = undefined;
-          
-          const orig = mod.getLinkPreview.bind(mod);
-          mod.getLinkPreview = (link: any) => {
-            // Restore original immediately (one-shot capture)
-            mod.getLinkPreview = orig;
-            (mod as any).__nativePreviewCaptured = true;
-            const result = orig(link);
-            result.then((preview: any) => {
-              if (preview && preview.data) {
-                const href = link?.href || link?.url || (typeof link === 'string' ? link : '');
-                const keys = Object.keys(preview.data);
-                (window as any).__lastNativePreview = {
-                  url: href,
-                  keys: keys,
-                  data: JSON.parse(JSON.stringify(preview, (k: string, v: any) => {
-                    if ((k === 'thumbnail' || k === 'thumbnailHQ') && typeof v === 'string') return `<base64:${v.length}chars>`;
-                    return v;
-                  }))
-                };
-              }
-            }).catch(() => {});
-            return result;
-          };
-        });
+        // Fail fast if the page is unresponsive — this is diagnostic-only and
+        // must never stall the send behind the 180s CDP protocol timeout.
+        await Promise.race([
+          this.client.pupPage.evaluate(() => {
+            const mod = (window as any).require('WAWebLinkPreviewChatAction');
+            if (!mod) return;
+            // Reset so we can install a fresh capture
+            (mod as any).__nativePreviewCaptured = false;
+            (window as any).__lastNativePreview = undefined;
+
+            const orig = mod.getLinkPreview.bind(mod);
+            mod.getLinkPreview = (link: any) => {
+              // Restore original immediately (one-shot capture)
+              mod.getLinkPreview = orig;
+              (mod as any).__nativePreviewCaptured = true;
+              const result = orig(link);
+              result.then((preview: any) => {
+                if (preview && preview.data) {
+                  const href = link?.href || link?.url || (typeof link === 'string' ? link : '');
+                  const keys = Object.keys(preview.data);
+                  (window as any).__lastNativePreview = {
+                    url: href,
+                    keys: keys,
+                    data: JSON.parse(JSON.stringify(preview, (k: string, v: any) => {
+                      if ((k === 'thumbnail' || k === 'thumbnailHQ') && typeof v === 'string') return `<base64:${v.length}chars>`;
+                      return v;
+                    }))
+                  };
+                }
+              }).catch(() => {});
+              return result;
+            };
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('NativePreviewCapture install timed out')), 8000)),
+        ]);
       } catch {
         // Best-effort capture, ignore failures
       }
@@ -379,11 +388,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     if (this.client?.pupPage) {
       try {
         await new Promise(r => setTimeout(r, 2000));
-        const captureResult = await this.client.pupPage.evaluate(() => {
-          const r = (window as any).__lastNativePreview;
-          (window as any).__lastNativePreview = undefined;
-          return r || null;
-        });
+        const captureResult = await Promise.race([
+          this.client.pupPage.evaluate(() => {
+            const r = (window as any).__lastNativePreview;
+            (window as any).__lastNativePreview = undefined;
+            return r || null;
+          }),
+          new Promise(r => setTimeout(() => r(null), 8000)),
+        ]);
         if (captureResult) {
           this.logger.log('[NativePreviewCapture] URL: ' + captureResult.url.slice(0, 120) + ' | keys: ' + captureResult.keys.join(','));
           this.logger.log('[NativePreviewCapture] full: ' + JSON.stringify(captureResult.data));
@@ -452,9 +464,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
     if (!previewData.pageHtml) {
       this.logger.warn('[LinkPreview] No pageHtml available');
-      return;
+    } else {
+      this.logger.log(`[LinkPreview] warmUpLinkPreview url=${url} | titleLen=${previewData.title?.length || 0} | descLen=${previewData.description?.length || 0} | htmlLen=${previewData.pageHtml.length} | imageUrl=${previewData.imageUrl ? 'present' : 'ABSENT'} | jpegThumbnail=${previewData.jpegThumbnailBase64 ? `${previewData.jpegThumbnailBase64.length} chars` : 'ABSENT'}`);
     }
-    this.logger.log(`[LinkPreview] warmUpLinkPreview url=${url} | titleLen=${previewData.title?.length || 0} | descLen=${previewData.description?.length || 0} | htmlLen=${previewData.pageHtml.length} | imageUrl=${previewData.imageUrl ? 'present' : 'ABSENT'} | jpegThumbnail=${previewData.jpegThumbnailBase64 ? `${previewData.jpegThumbnailBase64.length} chars` : 'ABSENT'}`);
 
     this.logger.log(`[LinkPreview] Request interception for: ${url}`);
 
@@ -526,6 +538,29 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       try { await page.setRequestInterception(true); } catch { /* best effort */ }
 
       page.on('request', req => {
+        // Fast path: only requests to our own intercept hosts reach the async
+        // matching logic. Everything else is continued inline so the
+        // interception layer stays a no-op for WhatsApp's own traffic (media
+        // uploads, ajax/bz keepalives, service workers, etc.). Previously the
+        // full matching logic ran on EVERY request and, with the renderer busy
+        // running our injected link-preview code, starved the page's request
+        // pipeline — the page then stopped answering evaluate() calls
+        // ("Runtime.callFunctionOn timed out" on every send).
+        let hostRelevant = false;
+        try {
+          const u = new URL(req.url());
+          const allowedHosts = new Set(
+            (this.linkPreviewIntercepts.get(page) || []).map(i => {
+              try { return new URL(i.targetUrl).hostname; } catch { return ''; }
+            }).filter(Boolean),
+          );
+          hostRelevant = allowedHosts.has(u.hostname);
+        } catch { hostRelevant = false; }
+        if (!hostRelevant) {
+          req.continue().catch(() => {});
+          return;
+        }
+
         void (async () => {
           const reqUrl = req.url();
           const seq = ++reqSeq;
@@ -542,6 +577,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           for (const intercept of live) {
             const normalizedTarget = intercept.targetUrl.replace(/\/$/, '').split('#')[0].split('?')[0];
             const htmlMatched =
+              !!intercept.html &&
               !intercept.htmlServed &&
               (normalizedReq === normalizedTarget || normalizedReq.startsWith(normalizedTarget));
 
@@ -630,7 +666,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     if (!this.client || !this.client.pupPage) return;
     try {
       const page = this.client.pupPage;
-      await page.evaluate(
+      // Fail fast if the page is unresponsive — a wedged renderer must not
+      // hold the whole broadcast queue behind the 180s CDP protocol timeout.
+      // The patch is installed once per page; a missed install on a busy page
+      // is better than blocking every subsequent send.
+      await Promise.race([
+        page.evaluate(
         (linkUrl: string, preview: any) => {
           const mod = (window as any).require('WAWebLinkPreviewChatAction');
           if (!mod) return;
@@ -896,7 +937,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         },
         url,
         previewData,
-      );
+      ),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Legacy patch install timed out')), 8000)),
+    ]);
     } catch (err) {
       this.logger.warn(`[LinkPreview] Legacy patch error: ${String(err)}`);
     }
