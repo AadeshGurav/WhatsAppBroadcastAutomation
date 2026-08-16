@@ -379,10 +379,39 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       }
     }
 
-    const msg = await this.client!.sendMessage(chatId, text, {
-      linkPreview: options?.linkPreview !== false,
-      waitUntilMsgSent: true,
-    });
+    // Guard the actual send. waitUntilMsgSent:true makes wwebjs await WA's
+    // addAndSendMsgToChat result promise, which can hang indefinitely when the
+    // renderer is wedged (heavy in-page link-preview upload pipeline) or WA's
+    // server is slow. An unguarded await here previously stalled the whole
+    // broadcast queue behind puppeteer's 600s protocolTimeout and wedged the
+    // page for every subsequent send. On timeout we destroy the client so the
+    // next broadcast reconnects with a fresh browser instead of reusing a
+    // poisoned one.
+    const SEND_MSG_TIMEOUT_MS = 90_000;
+    let msg: Awaited<ReturnType<Client['sendMessage']>>;
+    try {
+      msg = await Promise.race([
+        this.client!.sendMessage(chatId, text, {
+          linkPreview: options?.linkPreview !== false,
+          waitUntilMsgSent: true,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`SendMessage timed out after ${SEND_MSG_TIMEOUT_MS / 1000}s`)),
+            SEND_MSG_TIMEOUT_MS,
+          ),
+        ),
+      ]);
+    } catch (err) {
+      const msgText = (err as Error).message || '';
+      if (msgText.includes('timed out')) {
+        this.logger.warn(`[SendRecycle] sendMessage to ${chatId} hung — recycling browser: ${msgText}`);
+        // The renderer is wedged; destroying the client lets the session
+        // reconnect with a fresh browser instead of poisoning later sends.
+        await this.destroy().catch(() => {});
+      }
+      throw err;
+    }
 
     // Read back the capture result (wait a beat for the async getLinkPreview to complete)
     if (this.client?.pupPage) {
@@ -1014,10 +1043,29 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       messageMedia = new MessageMedia(media.mimetype, media.data.toString('base64'), media.filename);
     }
 
-    const msg = await this.client!.sendMessage(chatId, messageMedia, {
-      caption: media.caption,
-      waitUntilMsgSent: true,
-    });
+    const SEND_MSG_TIMEOUT_MS = 90_000;
+    let msg: Awaited<ReturnType<Client['sendMessage']>>;
+    try {
+      msg = await Promise.race([
+        this.client!.sendMessage(chatId, messageMedia, {
+          caption: media.caption,
+          waitUntilMsgSent: true,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`SendMediaMessage timed out after ${SEND_MSG_TIMEOUT_MS / 1000}s`)),
+            SEND_MSG_TIMEOUT_MS,
+          ),
+        ),
+      ]);
+    } catch (err) {
+      const msgText = (err as Error).message || '';
+      if (msgText.includes('timed out')) {
+        this.logger.warn(`[SendRecycle] sendMediaMessage to ${chatId} hung — recycling browser: ${msgText}`);
+        await this.destroy().catch(() => {});
+      }
+      throw err;
+    }
 
     return {
       id: msg?.id?._serialized || `unknown_${Date.now()}`,

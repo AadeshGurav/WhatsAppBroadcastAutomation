@@ -371,7 +371,9 @@ export class BroadcastDispatcherService {
 
     const adminId = task.admin.id;
     const workerId = task.workerId || `admin-${adminId}-sess-0`;
-    const SEND_TIMEOUT_MS = 600_000;
+    // 90s per send: the adapter now recycles the browser on timeout, so we no
+    // longer need to hold the queue for 10 minutes behind a hung sendMessage.
+    const SEND_TIMEOUT_MS = 90_000;
 
     // Mark task as IN_PROGRESS directly
     await this.taskRepo.update(task.id, {
