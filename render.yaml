@@ -25,6 +25,8 @@ services:
       # Application
       - key: NODE_ENV
         value: production
+      - key: DEPLOYMENT_MODE
+        value: cloud
       - key: PORT
         value: "10000"
       - key: HOST
@@ -82,6 +84,11 @@ services:
       - key: KEEP_ALIVE_INTERVAL_MS
         value: "420000"
 
+      # Neon compute — shrink the connection pool from the default 10 so a single
+      # instance can't exhaust Neon's free connection allowance.
+      - key: DATABASE_POOL_SIZE
+        value: "3"
+
       # Storage — local disk is wiped on restart (media not persisted on free tier)
       - key: STORAGE_TYPE
         value: local
@@ -93,6 +100,16 @@ services:
         value: "false"
       - key: CACHE_ENABLED
         value: "false"
+
+      # DB footprint — settings are read via a 30s TTL cache, "no change"
+      # scraper cycles don't write an activity row, and worker heartbeats keep
+      # logging (cloud telemetry) unless WORKER_LOG_WRITES=false.
+      - key: SETTINGS_CACHE_TTL_MS
+        value: "30000"
+      - key: SCRAPER_LOG_NO_CHANGE
+        value: "false"
+      - key: WORKER_LOG_WRITES
+        value: "true"
 
     healthCheckPath: /api/health/live
     dockerfilePath: ./Dockerfile

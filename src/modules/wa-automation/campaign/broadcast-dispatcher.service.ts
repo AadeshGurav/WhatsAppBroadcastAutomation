@@ -2,6 +2,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import { MessageTask, MessageTaskStatus } from '@database/entities/wa-automation/message-task.entity';
 import { BroadcastEvent, BroadcastStatus } from '@database/entities/wa-automation/broadcast-event.entity';
 import { AutomationService, ErrorCategory, DeliveryResult } from '../automation/automation.service';
@@ -26,12 +27,16 @@ export class BroadcastDispatcherService {
   /** Tracks broadcasts currently being dispatched to prevent concurrent dispatches. */
   private readonly dispatchingBroadcasts = new Set<number>();
 
-  private readonly MIN_DELAY_MS = 3000;
-  private readonly MAX_DELAY_MS = 8000;
-  private readonly BATCH_SIZE = 50;
-  private readonly BATCH_PAUSE_MIN_MS = 120_000;
-  private readonly BATCH_PAUSE_MAX_MS = 300_000;
-  private readonly DISPATCH_TIMEOUT_MINUTES = 60;
+  // Human-like pacing — values come from config so local mode can run freely
+  // (all delays 0) while cloud keeps the anti-ban throttles.
+  private readonly MIN_DELAY_MS: number;
+  private readonly MAX_DELAY_MS: number;
+  private readonly BATCH_SIZE: number;
+  private readonly BATCH_PAUSE_MIN_MS: number;
+  private readonly BATCH_PAUSE_MAX_MS: number;
+  private readonly DISPATCH_TIMEOUT_MINUTES: number;
+  private readonly RATE_LIMIT_RETRY_SLEEP_MS: number;
+  private readonly isLocal: boolean;
 
   constructor(
     @InjectRepository(MessageTask, 'data')
@@ -43,7 +48,17 @@ export class BroadcastDispatcherService {
     private readonly attemptTracker: AttemptTrackerService,
     private readonly maintenanceService: MaintenanceService,
     private readonly adminSessionService: AdminSessionService,
-  ) {}
+    configService: ConfigService,
+  ) {
+    this.MIN_DELAY_MS = configService.get<number>('automation.perMessageDelayMin', 3000);
+    this.MAX_DELAY_MS = configService.get<number>('automation.perMessageDelayMax', 8000);
+    this.BATCH_SIZE = configService.get<number>('automation.batchSize', 50);
+    this.BATCH_PAUSE_MIN_MS = configService.get<number>('automation.batchPauseMin', 120_000);
+    this.BATCH_PAUSE_MAX_MS = configService.get<number>('automation.batchPauseMax', 300_000);
+    this.DISPATCH_TIMEOUT_MINUTES = configService.get<number>('automation.dispatchTimeoutMinutes', 60);
+    this.RATE_LIMIT_RETRY_SLEEP_MS = configService.get<number>('automation.rateLimitRetrySleepMs', 60_000);
+    this.isLocal = configService.get<boolean>('isLocal', false);
+  }
 
   /**
    * Dispatch a broadcast's pending tasks across all assigned admins in parallel.
@@ -241,12 +256,14 @@ export class BroadcastDispatcherService {
         continue;
       }
 
-      // Human-like per-message delay
-      const delayMs = this.MIN_DELAY_MS + Math.random() * (this.MAX_DELAY_MS - this.MIN_DELAY_MS);
-      await this.sleep(delayMs);
+      // Human-like per-message delay (skipped in local mode)
+      if (this.MIN_DELAY_MS > 0) {
+        const delayMs = this.MIN_DELAY_MS + Math.random() * (this.MAX_DELAY_MS - this.MIN_DELAY_MS);
+        await this.sleep(delayMs);
+      }
 
-      // Batch pause
-      if (i > 0 && i % this.BATCH_SIZE === 0) {
+      // Batch pause (skipped in local mode)
+      if (this.BATCH_PAUSE_MIN_MS > 0 && i > 0 && i % this.BATCH_SIZE === 0) {
         const pauseMs = this.BATCH_PAUSE_MIN_MS + Math.random() * (this.BATCH_PAUSE_MAX_MS - this.BATCH_PAUSE_MIN_MS);
         this.logger.debug(`Admin #${adminId}: pausing ${Math.round(pauseMs / 1000)}s after ${i} messages`);
         await this.sleep(pauseMs);
@@ -255,8 +272,12 @@ export class BroadcastDispatcherService {
       // Rate limiter check
       const rateCheck = this.rateLimiter.check(adminId, warmUpMultiplier);
       if (!rateCheck.allowed) {
-        this.logger.warn(`Admin #${adminId} rate-limited at msg ${i + 1}/${tasks.length}, delaying 60s`);
-        await this.sleep(60_000);
+        if (this.isLocal) {
+          this.logger.warn(`Admin #${adminId} rate-limited at msg ${i + 1}/${tasks.length} — local mode, skipping wait`);
+        } else {
+          this.logger.warn(`Admin #${adminId} rate-limited at msg ${i + 1}/${tasks.length}, delaying 60s`);
+          await this.sleep(this.RATE_LIMIT_RETRY_SLEEP_MS);
+        }
         const retryCheck = this.rateLimiter.check(adminId, warmUpMultiplier);
         if (!retryCheck.allowed) {
           // Graceful: skip remaining tasks instead of failing them

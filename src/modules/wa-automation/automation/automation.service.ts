@@ -46,6 +46,7 @@ export class AutomationService {
   private readonly maxRetries: number;
   private readonly FAILED_RETRY_TTL_MS = 3_600_000;
   private readonly rateLimitRetryDelay: number;
+  private readonly isLocal: boolean;
 
   /**
    * Disk-backed cache of generated link-preview thumbnails keyed by article URL.
@@ -107,6 +108,7 @@ export class AutomationService {
   ) {
     this.maxRetries = configService.get<number>('automation.maxRetryAttempts', 3);
     this.rateLimitRetryDelay = configService.get<number>('automation.rateLimitRetryDelay', 3600);
+    this.isLocal = configService.get<boolean>('isLocal', false);
     this.loadPreviewThumbnailCache();
   }
 
@@ -124,15 +126,19 @@ export class AutomationService {
   ): Promise<DeliveryResult> {
     const startTime = Date.now();
 
-    // 1. Check quiet hours (reads from DB settings with timezone awareness)
-    const inQuietHours = await this.quietHours.isQuietHours();
-    if (inQuietHours) {
-      const mins = await this.quietHours.minutesUntilEnd();
-      return {
-        success: false,
-        errorCategory: ErrorCategory.RATE_LIMITED,
-        errorMessage: `Quiet hours (${mins}min until end)`,
-      };
+    // 1. Check quiet hours (reads from DB settings with timezone awareness).
+    //    Skipped in local mode — quiet hours exist to protect WhatsApp numbers
+    //    from night-time cloud-IP suspicion; a residential IP runs freely.
+    if (!this.isLocal) {
+      const inQuietHours = await this.quietHours.isQuietHours();
+      if (inQuietHours) {
+        const mins = await this.quietHours.minutesUntilEnd();
+        return {
+          success: false,
+          errorCategory: ErrorCategory.RATE_LIMITED,
+          errorMessage: `Quiet hours (${mins}min until end)`,
+        };
+      }
     }
 
     // 2. Check rate limits
@@ -198,8 +204,10 @@ export class AutomationService {
             result = await engine.sendDocumentMessage(chatId, opts);
           }
 
-          // Brief pause to avoid rate issues between media
-          await new Promise(r => setTimeout(r, 1500));
+          // Brief pause to avoid rate issues between media (skipped in local mode)
+          if (!this.isLocal) {
+            await new Promise(r => setTimeout(r, 1500));
+          }
         }
       } else {
         result = await engine.sendTextMessage(chatId, text, { linkPreview: true });

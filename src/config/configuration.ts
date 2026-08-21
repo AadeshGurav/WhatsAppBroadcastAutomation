@@ -1,5 +1,24 @@
+const DEPLOYMENT_MODE: 'cloud' | 'local' =
+  (process.env.DEPLOYMENT_MODE || (process.env.NODE_ENV === 'production' ? 'cloud' : 'local')) === 'local'
+    ? 'local'
+    : 'cloud';
+
 export default () => ({
   port: parseInt(process.env.PORT || '2785', 10),
+
+  /**
+   * Deployment mode:
+   *  - 'cloud' (default, and always when NODE_ENV=production): keeps all the
+   *    anti-ban / WAF throttles and human-like pacing that protect the
+   *    WhatsApp numbers when running on Render (cloud IPs are heavily
+   *    scrutinized, and Hostinger WAF rate-limits the Render IP).
+   *  - 'local': runs on a residential IP — no WAF, no cloud-IP reputation —
+   *    so all pacing/delays are relaxed to let processing run freely. Set
+   *    DEPLOYMENT_MODE=local explicitly (or rely on NODE_ENV != production).
+   */
+  deploymentMode: DEPLOYMENT_MODE,
+  // True when running in relaxed local mode (no throttles).
+  isLocal: DEPLOYMENT_MODE === 'local',
 
   // Redis configuration
   redis: {
@@ -38,8 +57,10 @@ export default () => ({
     password: process.env.DATABASE_PASSWORD,
     synchronize: process.env.DATABASE_SYNCHRONIZE === 'true',
     logging: process.env.DATABASE_LOGGING === 'true',
-    // Connection pooling (PostgreSQL)
-    poolSize: parseInt(process.env.DATABASE_POOL_SIZE || '10', 10),
+    // Connection pooling (PostgreSQL) — cloud keeps a modest pool (10); local
+    // apps are typically the only consumer so a smaller pool (4) is plenty and
+    // burns fewer Neon connections.
+    poolSize: parseInt(process.env.DATABASE_POOL_SIZE || (DEPLOYMENT_MODE === 'local' ? '4' : '10'), 10),
     // SSL configuration
     ssl: process.env.DATABASE_SSL === 'true',
     sslRejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false',
@@ -102,7 +123,12 @@ export default () => ({
   // Scraper configuration
   scraper: {
     timeout: parseInt(process.env.SCRAPER_REQUEST_TIMEOUT || '30', 10),
-    maxRetries: parseInt(process.env.SCRAPER_MAX_RETRIES || '3', 10),
+    // Local: no WAF, so retries can be fast and minimal. Cloud: keep the
+    // exponential backoff to avoid hammering the target site.
+    maxRetries: parseInt(
+      process.env.SCRAPER_MAX_RETRIES || (DEPLOYMENT_MODE === 'local' ? '1' : '3'),
+      10,
+    ),
     activeHourStart: parseInt(process.env.SCRAPER_ACTIVE_HOUR_START || '0', 10),
     activeHourEnd: parseInt(process.env.SCRAPER_ACTIVE_HOUR_END || '23', 10),
     activeWeekdays: process.env.SCRAPER_ACTIVE_WEEKDAYS || '0,1,2,3,4,5,6',
@@ -115,8 +141,8 @@ export default () => ({
     dailyLimit: parseInt(process.env.AUTOMATION_DAILY_LIMIT || '5000', 10),
     batchSize: parseInt(process.env.AUTOMATION_BATCH_SIZE || '50', 10),
     batchCooldown: parseInt(process.env.AUTOMATION_BATCH_COOLDOWN || '900', 10),
-    jitterMin: parseFloat(process.env.AUTOMATION_JITTER_MIN || '30'),
-    jitterMax: parseFloat(process.env.AUTOMATION_JITTER_MAX || '120'),
+    jitterMin: parseFloat(process.env.AUTOMATION_JITTER_MIN || (DEPLOYMENT_MODE === 'local' ? '0' : '30')),
+    jitterMax: parseFloat(process.env.AUTOMATION_JITTER_MAX || (DEPLOYMENT_MODE === 'local' ? '1' : '120')),
     jitterMultiplier: parseFloat(process.env.AUTOMATION_JITTER_MULTIPLIER || '1.5'),
     quietHourStart: parseInt(process.env.AUTOMATION_QUIET_HOUR_START || '1', 10),
     quietHourEnd: parseInt(process.env.AUTOMATION_QUIET_HOUR_END || '7', 10),
@@ -124,6 +150,14 @@ export default () => ({
     rateLimitRetryDelay: parseInt(process.env.RATE_LIMIT_RETRY_DELAY || '3600', 10),
     groupMaxConsecutiveFailures: parseInt(process.env.GROUP_MAX_CONSECUTIVE_FAILURES || '10', 10),
     groupUnhealthyRecoveryHours: parseInt(process.env.GROUP_UNHEALTHY_RECOVERY_HOURS || '2', 10),
+    // Human-like pacing used by the broadcast dispatcher. Local mode runs
+    // without per-message delays, batch pauses, or rate-limit sleeps.
+    perMessageDelayMin: parseInt(process.env.BROADCAST_DELAY_MIN_MS || (DEPLOYMENT_MODE === 'local' ? '0' : '3000'), 10),
+    perMessageDelayMax: parseInt(process.env.BROADCAST_DELAY_MAX_MS || (DEPLOYMENT_MODE === 'local' ? '0' : '8000'), 10),
+    batchPauseMin: parseInt(process.env.BROADCAST_BATCH_PAUSE_MIN_MS || (DEPLOYMENT_MODE === 'local' ? '0' : '120000'), 10),
+    batchPauseMax: parseInt(process.env.BROADCAST_BATCH_PAUSE_MAX_MS || (DEPLOYMENT_MODE === 'local' ? '0' : '300000'), 10),
+    dispatchTimeoutMinutes: parseInt(process.env.BROADCAST_DISPATCH_TIMEOUT_MINUTES || '60', 10),
+    rateLimitRetrySleepMs: parseInt(process.env.BROADCAST_RATE_LIMIT_SLEEP_MS || (DEPLOYMENT_MODE === 'local' ? '0' : '60000'), 10),
   },
 
   // Storage configuration

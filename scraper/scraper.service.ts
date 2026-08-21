@@ -260,11 +260,16 @@ export class ScraperService {
       const existing = await this.hashRepo.findOne({ where: { url } });
       if (existing && !this.changeDetector.hasChanged(existing.contentHash, html)) {
         this.logger.log(`No change detected on listing page: ${url}`);
-        await this.logActivity({
-          url, articlesFound: 0, articlesNew: 0, articlesSkipped: 0,
-          articlesFailed: 0, listingChanged: false,
-          durationMs: Date.now() - startTime,
-        });
+        // Only persist an activity row when something actually happened —
+        // a "no change" write every minute is ~1,440 rows/day of churn that
+        // burns Neon compute for no signal.
+        if (process.env.SCRAPER_LOG_NO_CHANGE === 'true') {
+          await this.logActivity({
+            url, articlesFound: 0, articlesNew: 0, articlesSkipped: 0,
+            articlesFailed: 0, listingChanged: false,
+            durationMs: Date.now() - startTime,
+          });
+        }
         return [];
       }
 

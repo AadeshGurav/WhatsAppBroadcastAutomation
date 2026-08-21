@@ -5,6 +5,15 @@ export class BrowserFetchUtil {
   private static browser: puppeteer.Browser | null = null;
   private static readonly logger = new Logger('BrowserFetchUtil');
 
+  /**
+   * Local mode (residential IP) hits no WAF, so we skip the heavy Puppeteer
+   * fallback entirely and keep raw fetches fast. Cloud mode keeps the
+   * browser fallback for Hostinger/Cloudflare WAF blocks.
+   */
+  private static get isLocal(): boolean {
+    return process.env.DEPLOYMENT_MODE === 'local' || process.env.NODE_ENV !== 'production';
+  }
+
   private static async getBrowser(): Promise<puppeteer.Browser> {
     if (!this.browser) {
       this.logger.log('Launching shared browser instance for fallback fetch...');
@@ -49,8 +58,10 @@ export class BrowserFetchUtil {
       
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
       
-      // Optional: wait a moment for CF/WAF challenge to clear if any
-      await new Promise(r => setTimeout(r, 2000));
+      // Optional: wait a moment for CF/WAF challenge to clear if any (not needed locally)
+      if (!this.isLocal) {
+        await new Promise(r => setTimeout(r, 2000));
+      }
       
       const content = await page.content();
       this.logger.log(`[HtmlFetch] Browser fallback OK: ${url} (${content.length} chars)`);
@@ -69,6 +80,24 @@ export class BrowserFetchUtil {
    * on common WAF blocks or network failures.
    */
   static async fetchWithFallback(url: string, timeout = 30_000): Promise<string> {
+    // Local mode: no WAF to bypass — raw fetch only, fail fast.
+    if (this.isLocal) {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(timeout),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} fetching ${url}`);
+      }
+      const text = await response.text();
+      this.logger.log(`[HtmlFetch] raw fetch OK: ${url} (${text.length} chars)`);
+      return text;
+    }
+
     try {
       const response = await fetch(url, {
         signal: AbortSignal.timeout(timeout),
@@ -108,6 +137,23 @@ export class BrowserFetchUtil {
   static async fetchArrayBufferWithFallback(url: string, timeout = 30_000): Promise<ArrayBuffer> {
     // For images, we can try to fetch them natively. If WAF blocks, we could use page.goto() + page.evaluate()
     // or just page.goto() and then get the response buffer.
+    // Local mode: no WAF — raw fetch only, fail fast.
+    if (this.isLocal) {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(timeout),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} fetching ${url}`);
+      }
+      const buf = await response.arrayBuffer();
+      this.logger.log(`[ImageFetch] raw fetch OK: ${url} (${buf.byteLength} bytes)`);
+      return buf;
+    }
+
     try {
       const response = await fetch(url, {
         signal: AbortSignal.timeout(timeout),

@@ -384,8 +384,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       waitUntilMsgSent: true,
     });
 
-    // Read back the capture result (wait a beat for the async getLinkPreview to complete)
-    if (this.client?.pupPage) {
+    // Read back the capture result (wait a beat for the async getLinkPreview to complete).
+    // Skipped in local mode — the 2s wait exists to let WA's native crawler work
+    // around cloud/WAF constraints; locally the preview resolves without it.
+    if (this.client?.pupPage && process.env.DEPLOYMENT_MODE !== 'local') {
       try {
         await new Promise(r => setTimeout(r, 2000));
         const captureResult = await Promise.race([
@@ -1189,8 +1191,10 @@ if (attempts >= 3) {
           }
           return [];
         }
-        // Wait 2 seconds before retrying
-        await new Promise(r => setTimeout(r, 2000));
+        // Wait 2 seconds before retrying (skipped in local mode — no WAF/cloud constraints)
+        if (process.env.DEPLOYMENT_MODE !== 'local') {
+          await new Promise(r => setTimeout(r, 2000));
+        }
       }
     }
 

@@ -19,12 +19,36 @@ export interface WorkerSlot {
 export class WorkerTrackerService {
   private readonly logger = new Logger('WorkerTrackerService');
 
+  /**
+   * Whether worker_session_logs rows are persisted. Every heartbeat (5 min per
+   * session) writes a log row and the table grows unbounded — a meaningful
+   * chunk of Neon compute/storage. Local mode defaults this off (logs still go
+   * to the app logger). Set WORKER_LOG_WRITES=true to keep them.
+   */
+  private readonly writeLogs: boolean;
+
   constructor(
     @InjectRepository(WorkerSession, 'data')
     private readonly sessionRepo: Repository<WorkerSession>,
     @InjectRepository(WorkerSessionLog, 'data')
     private readonly logRepo: Repository<WorkerSessionLog>,
-  ) {}
+  ) {
+    this.writeLogs =
+      process.env.WORKER_LOG_WRITES === 'true' ||
+      (process.env.DEPLOYMENT_MODE !== 'local' && process.env.NODE_ENV === 'production' &&
+        process.env.WORKER_LOG_WRITES !== 'false');
+  }
+
+  private async recordLog(workerSessionId: number, event: SessionEventType, detail?: string | null): Promise<void> {
+    if (!this.writeLogs) return;
+    await this.logRepo.save(
+      this.logRepo.create({
+        workerSessionId,
+        event,
+        detail: detail ?? null,
+      }),
+    );
+  }
 
   async registerWorker(workerId: string, adminId: number): Promise<WorkerSession> {
     let session = await this.sessionRepo.findOne({ where: { workerId } });
@@ -52,13 +76,7 @@ export class WorkerTrackerService {
     }
     session = await this.sessionRepo.save(session);
 
-    await this.logRepo.save(
-      this.logRepo.create({
-        workerSessionId: session.id,
-        event: SessionEventType.HEARTBEAT,
-        detail: JSON.stringify(data || {}),
-      }),
-    );
+    await this.recordLog(session.id, SessionEventType.HEARTBEAT, JSON.stringify(data || {}));
 
     return session;
   }
@@ -69,13 +87,7 @@ export class WorkerTrackerService {
       session.currentGroupId = groupId;
       session.status = WorkerStatus.ACTIVE;
       await this.sessionRepo.save(session);
-      await this.logRepo.save(
-        this.logRepo.create({
-          workerSessionId: session.id,
-          event: SessionEventType.TASK_STARTED,
-          detail: `Group: ${groupId}`,
-        }),
-      );
+      await this.recordLog(session.id, SessionEventType.TASK_STARTED, `Group: ${groupId}`);
     }
   }
 
@@ -90,12 +102,7 @@ export class WorkerTrackerService {
       session.currentGroupId = null;
       session.status = WorkerStatus.IDLE;
       await this.sessionRepo.save(session);
-      await this.logRepo.save(
-        this.logRepo.create({
-          workerSessionId: session.id,
-          event: success ? SessionEventType.COMPLETED : SessionEventType.FAILED,
-        }),
-      );
+      await this.recordLog(session.id, success ? SessionEventType.COMPLETED : SessionEventType.FAILED);
     }
   }
 
@@ -105,13 +112,7 @@ export class WorkerTrackerService {
       session.status = WorkerStatus.OFFLINE;
       if (error) session.lastError = error;
       await this.sessionRepo.save(session);
-      await this.logRepo.save(
-        this.logRepo.create({
-          workerSessionId: session.id,
-          event: SessionEventType.SHUTDOWN,
-          detail: error || null,
-        }),
-      );
+      await this.recordLog(session.id, SessionEventType.SHUTDOWN, error || null);
     }
   }
 
