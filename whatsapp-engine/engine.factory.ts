@@ -4,8 +4,10 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { IWhatsAppEngine } from './interfaces/whatsapp-engine.interface';
 import { WhatsAppWebJsAdapter } from './adapters/whatsapp-web-js.adapter';
+import { BaileysAdapter } from './adapters/baileys.adapter';
 import { PluginLoaderService, PluginType, IEnginePlugin, PluginManifest } from '@core/plugins';
 import { WhatsAppWebJsPlugin } from './plugins/whatsapp-web-js';
+import { BaileysPlugin } from './plugins/baileys';
 import { createLogger } from '@common/services/logger.service';
 
 export interface EngineCreateOptions {
@@ -58,6 +60,21 @@ export class EngineFactory implements OnModuleInit {
     const wwjsPlugin = new WhatsAppWebJsPlugin();
     this.pluginLoader.registerBuiltInPlugin(wwjsManifest, wwjsPlugin);
 
+    // Register Baileys as a built-in plugin — the browser-free engine that
+    // lets Senderrr run its WhatsApp connection on an Android phone.
+    const baileysManifest: PluginManifest = {
+      id: 'baileys',
+      name: 'Baileys Engine',
+      version: '1.0.0',
+      type: PluginType.ENGINE,
+      description: 'Browser-free WhatsApp multi-device protocol engine adapter',
+      main: 'index.ts',
+      provides: ['whatsapp-engine'],
+    };
+
+    const baileysPlugin = new BaileysPlugin();
+    this.pluginLoader.registerBuiltInPlugin(baileysManifest, baileysPlugin);
+
     // Auto-enable the configured engine
     try {
       await this.pluginLoader.enablePlugin(this.engineType);
@@ -91,6 +108,17 @@ export class EngineFactory implements OnModuleInit {
   }
 
   private createDirectEngine(options: EngineCreateOptions): IWhatsAppEngine {
+    if (this.engineType === 'baileys') {
+      return new BaileysAdapter(
+        {
+          sessionId: options.sessionId,
+          pairingPhoneNumber: this.configService.get<string>('engine.baileys.pairingPhoneNumber') || undefined,
+          browserName: this.configService.get<string>('engine.baileys.browserName') || 'Senderrr',
+        },
+        this.dataSource,
+      );
+    }
+
     return new WhatsAppWebJsAdapter(
       {
         sessionId: options.sessionId,

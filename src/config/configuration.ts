@@ -79,6 +79,14 @@ export default () => ({
     // sessionDataPath removed — RemoteAuth stores WhatsApp sessions in Postgres via
     // PostgresRemoteAuthStore. Keep SESSION_DATA_PATH env var for disk-based cleanup
     // (Chrome lock files) which operates on the process level via pkill.
+    baileys: {
+      // Set to pair by phone-number code instead of scanning a QR (useful
+      // when there's no way to see the phone's screen during setup). Leave
+      // unset to keep the default QR-code flow.
+      pairingPhoneNumber: process.env.ENGINE_BAILEYS_PAIRING_PHONE_NUMBER || undefined,
+      // Display name shown on the linked WhatsApp account's "Linked devices" screen.
+      browserName: process.env.ENGINE_BAILEYS_BROWSER_NAME || 'Senderrr',
+    },
   },
 
   // Webhook configuration
