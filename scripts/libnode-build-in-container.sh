@@ -27,6 +27,9 @@ readonly NDK_VERSION="28.2.13676358"
 # Termux only needs below 28 (PRD ADR-3, commit 6's minSdk).
 readonly ANDROID_API="28"
 
+# Marks the trap-handler edit below as done, so a rerun is a no-op.
+readonly PATCH_MARKER="Senderrr: V8 trap handler disabled for the Android cross build (ADR-3)."
+
 readonly ANDROID_ABI="${ANDROID_ABI:-arm64-v8a}"
 
 # ── Output helpers ──────────────────────────────────────────────────────────
@@ -109,16 +112,53 @@ fetch_node_source() {
 apply_android_patches() {
   local header="$SOURCE_DIR/deps/v8/src/trap-handler/trap-handler.h"
 
-  grep -q "V8_TRAP_HANDLER_SUPPORTED true" "$header" || {
+  if grep -q "$PATCH_MARKER" "$header"; then
     log_info "Android patches already applied."
     return
-  }
+  fi
 
   log_step "Applying Node's Android patches"
-  ( cd "$SOURCE_DIR" \
-      && patch -f ./deps/v8/src/trap-handler/trap-handler.h \
-           < ./android-patches/trap-handler.h.patch ) \
-    || die "Could not apply the trap-handler patch."
+  # Node's own android-patches/trap-handler.h.patch expresses the intent but no
+  # longer applies to Node 24's copy of this header — upstream only ever runs it
+  # on a Linux host, so the drift went unnoticed. Rather than carry a patch that
+  # breaks on the next V8 bump, this rewrites the same region by structure:
+  # find the #if chain that decides V8_TRAP_HANDLER_SUPPORTED and replace the
+  # whole thing with the "false" the patch was reaching for.
+  PATCH_MARKER="$PATCH_MARKER" python3 - "$header" <<'PYTHON'
+import os, sys, pathlib
+
+header = pathlib.Path(sys.argv[1])
+lines = header.read_text().splitlines(keepends=True)
+
+start = next(
+    i for i, line in enumerate(lines)
+    if line.startswith("#if") and "V8_HOST_ARCH_X64" in line and "V8_TARGET_ARCH_X64" in line
+)
+# Take the comment heading the block too, so it does not survive to describe
+# code that is no longer there.
+if start and lines[start - 1].lstrip().startswith("//"):
+    start -= 1
+
+depth = 0
+for end, line in enumerate(lines[start:], start):
+    stripped = line.lstrip()
+    if stripped.startswith(("#if", "#ifdef", "#ifndef")):
+        depth += 1
+    elif stripped.startswith("#endif"):
+        depth -= 1
+        if depth == 0:
+            break
+else:
+    sys.exit("Could not find the end of the V8_TRAP_HANDLER_SUPPORTED block.")
+
+lines[start:end + 1] = [
+    "// %s\n" % os.environ["PATCH_MARKER"],
+    "#define V8_TRAP_HANDLER_SUPPORTED false\n",
+]
+header.write_text("".join(lines))
+PYTHON
+
+  grep -q "$PATCH_MARKER" "$header" || die "Could not disable V8's trap handler."
   log_success "Patched deps/v8/src/trap-handler/trap-handler.h"
 }
 

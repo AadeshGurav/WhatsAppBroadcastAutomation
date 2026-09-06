@@ -39,7 +39,7 @@ RUN mkdir -p "$ANDROID_SDK_ROOT/ndk" \
 # toolsets, so the tools V8 and ICU build to run here need zlib too, not just
 # the Android target (which links the NDK's own libz).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential python3 python3-venv git zlib1g-dev patch \
+        build-essential python3 python3-venv git zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
