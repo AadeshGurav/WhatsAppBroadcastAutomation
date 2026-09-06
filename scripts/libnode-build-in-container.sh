@@ -172,8 +172,19 @@ OS=android android_ndk_path=$ndk_root"
 # ── Build ───────────────────────────────────────────────────────────────────
 build_node() {
   log_step "Building libnode.so (this takes 1-2 hours cold)"
-  local jobs; jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 
+  # Parallelism is bounded by memory, not just cores. V8's compiler sources —
+  # turboshaft especially — take well over a gigabyte each in the compiler, so
+  # one job per core is what gets cc1plus killed by the OOM killer on a machine
+  # with less RAM than it has cores. Budget roughly 2 GB per job, at least one.
+  local cores memory_kb jobs_by_memory jobs
+  cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+  memory_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 4194304)"
+  jobs_by_memory=$(( memory_kb / 2097152 ))
+  [ "$jobs_by_memory" -lt 1 ] && jobs_by_memory=1
+  jobs=$(( cores < jobs_by_memory ? cores : jobs_by_memory ))
+
+  log_info "Using $jobs parallel jobs ($cores cores, $(( memory_kb / 1024 )) MB RAM)."
   ( cd "$SOURCE_DIR" && make -j"$jobs" ) || die "build failed — see output above."
   log_success "Build finished."
 }
