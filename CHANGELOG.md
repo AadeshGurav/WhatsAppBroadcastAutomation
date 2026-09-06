@@ -18,8 +18,15 @@ developer or client-facing operator would want to know, not a raw commit-message
   and no terminal. What works so far — the app installs and launches, starts a foreground
   service that runs the server in its own `:noderuntime` process, unpacks the server into app
   storage on first run, keeps the CPU awake while it serves, restarts itself if the runtime
-  process dies, and comes back after a reboot. Still to come in this phase: the Home and
-  Advanced screens (PRD commits 12-13). The Termux path (`ANDROID_SETUP.md`) is unaffected and
+  process dies, and comes back after a reboot. A Home screen shows whether the server is running
+  and starts or stops it; it also asks for the background-execution permission Android otherwise
+  uses to kill the server overnight, and keeps asking if that permission is ever withdrawn. An
+  **Advanced** screen behind a warning shows the runtime's live output and offers restart and
+  copy-logs — a read-only tail, not a shell (PRD ADR-8).
+
+  **Not usable yet**: WhatsApp pairing still happens through the dashboard, the app cannot make
+  the server reachable from outside the local network (Cloudflare Tunnel, PRD Phase 3), and it
+  does not update itself (PRD Phase 5). The Termux path (`ANDROID_SETUP.md`) is unaffected and
   stays supported — the two are independent deployment methods, not a migration with a deadline.
 - `scripts/build-libnode.sh` — cross-compiles the Node 24 runtime as `libnode.so` for Android,
   inside a pinned Linux toolchain image so the build is the same on any machine. Needed once

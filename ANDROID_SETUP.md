@@ -7,12 +7,12 @@ no coding, no computer required. Once it's done, that phone runs Senderrr
 Expect this to take **30–45 minutes** the first time, most of it waiting for
 downloads and installs.
 
-This is the Termux-based setup — the fastest way to get Senderrr running on a
-phone today. A dedicated Senderrr Android app (no Termux, install one APK,
-updates itself) is planned next; see
-[`docs/23-android-ndk-migration-prd.md`](docs/23-android-ndk-migration-prd.md)
-if you want the full roadmap. This guide will keep working after that app
-ships — it isn't going away.
+This is the Termux-based setup — the way to get Senderrr running on a phone
+today, and the one to follow. The dedicated Senderrr Android app (no Termux,
+one APK to install) is being built now and is **not ready to use yet**; see
+[the app in progress](#the-senderrr-app-in-progress) below for where it
+stands. This guide will keep working after that app ships — it isn't going
+away.
 
 ## What you'll need
 
@@ -155,3 +155,39 @@ never changes.
 
 **I want to see the auto-generated admin key again.**
 It's saved in the project folder — run `cat data/.api-key` in Termux.
+
+---
+
+## The Senderrr app, in progress
+
+A native Senderrr app is being built to replace every step above with
+installing one file. It is **not finished**, so nothing here is something to
+follow yet — this section exists so you know what is coming and can tell
+whether it has arrived.
+
+**What it will change for you.** Install one APK, tap through a few
+permission prompts, and the phone is running Senderrr. No Termux, no typing
+commands, no computer. After that, new versions of the server arrive on their
+own, without reinstalling anything.
+
+**What already works**, if you are building it yourself from this repository
+(see [`android/README.md`](android/README.md)):
+
+- The app installs and opens, and shows whether your server is running.
+- Start and stop it from one button.
+- The server runs in the background with its own notification, keeps running
+  when you swipe the app away, and comes back on its own if it crashes or the
+  phone reboots.
+- The app asks for the one Android permission that matters — permission to
+  keep running in the background — and keeps asking if it is ever taken away.
+- An **Advanced** screen, behind a warning, shows the server's live activity
+  and lets you restart it or copy the logs to send to whoever supports you.
+
+**What is not done yet.** Connecting WhatsApp still happens through the
+dashboard rather than in the app; the app cannot yet make the server
+reachable from outside your home Wi-Fi (Cloudflare Tunnel, still a Termux-only
+feature today); and it does not yet update itself. Those are the next steps in
+[the plan](docs/23-android-ndk-migration-prd.md).
+
+**Nothing you set up above is wasted.** The two are separate ways of running
+the same software, and the Termux one stays supported.

@@ -498,7 +498,7 @@ follow-up.** Phase 0/1 are already done; they're listed for continuity.
    far, so Phase 2 onward has somewhere to record itself from commit one.
 3. **`docs: cross-link PRD and changelog from README/ANDROID_SETUP`** — discoverability, §15.
 
-### Phase 2 — Android shell + embedded Node (the spike-heavy phase)
+### Phase 2 — Android shell + embedded Node (the spike-heavy phase) — code complete, pending on-device verification
 
 4. **`spike(ndk): cross-compile libnode.so and run a hello-world script`** — *not* app code; a
    standalone build script + a throwaway instrumented test app that loads `libnode.so` and runs
@@ -540,6 +540,18 @@ follow-up.** Phase 0/1 are already done; they're listed for continuity.
     Node stdout/stderr.
 14. **`docs: update PRD + CHANGELOG + add a v1 Android app section to ANDROID_SETUP.md`** —
     closes out Phase 2 per the "every phase updates docs" rule.
+
+**Phase 2 status.** Commits 4-14 are written and the app builds, lints clean and installs. Every
+*verification* step above is still outstanding, because all of them need a real phone attached:
+the hello-world log line (4), the crash-and-restart test (9), `/health` answering on localhost
+(10), the reboot test (11), and the mobile checklist (12-13). `NodeRuntimeTest` encodes the first
+of these and runs with `./gradlew :app:connectedDebugAndroidTest`. Two additions to the plan that
+came out of building it, recorded here rather than left implicit: the runtime's working directory
+is deliberately kept **outside** the bundle directory, with relative symlinks into it, so an OTA
+swap (ADR-6) renames one directory without the client's data in the blast radius; and
+cross-process runtime state moves through a small file the runtime writes and the UI watches,
+rather than a bound AIDL interface — one writer, one reader, and a value that survives either
+process restarting.
 
 ### Phase 3 — Tunnel + dashboard reachability
 
