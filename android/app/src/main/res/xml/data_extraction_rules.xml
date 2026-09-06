@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This app's storage holds WhatsApp session credentials and the client's
+     message database. Neither may leave the device through Android's own
+     backup or device-transfer channels: the sanctioned copy is the Drive
+     backup the client explicitly enables (ADR-9), which they can see and
+     revoke. android:allowBackup="false" covers cloud backup; these rules
+     cover device-to-device transfer on Android 12 and above. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+    </device-transfer>
+</data-extraction-rules>

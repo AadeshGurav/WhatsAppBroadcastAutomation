@@ -1,4 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Senderrr</string>
+
+    <!-- Foreground-service notification -->
+    <string name="runtime_channel_name">Server status</string>
+    <string name="runtime_channel_description">Shows whether your Senderrr server is running.</string>
+    <string name="runtime_status_starting">Starting your server…</string>
+    <string name="runtime_status_running">Your server is running.</string>
+    <string name="runtime_status_stopped">Your server is stopped.</string>
+    <string name="runtime_status_failed">Your server stopped: %1$s</string>
+
+    <!-- Reasons the runtime could not start, written for the client, not for a log -->
+    <string name="runtime_error_no_library">This build is missing its server runtime. Reinstall the app.</string>
+    <string name="runtime_error_no_bundle">No server software is installed yet.</string>
+    <string name="runtime_error_exited">it shut down unexpectedly (code %1$d)</string>
 </resources>
