@@ -57,9 +57,10 @@ version="$( (cd "$STAGING_DIR" && find . -type f -exec shasum -a 256 {} + | sort
 
 mkdir -p "$ASSETS_DIR"
 rm -f "$ASSETS_DIR/bundle.zip"
-# Stored, not deflated: the APK is compressed as a whole, and an already-
-# compressed asset only costs the phone CPU time on every read.
-( cd "$STAGING_DIR" && zip -q -r -0 "$ASSETS_DIR/bundle.zip" . ) \
+# Deflated. The phone pays for this once, while unpacking on first run; an
+# uncompressed bundle would make the APK roughly three times the size, every
+# time anyone downloads or sideloads it.
+( cd "$STAGING_DIR" && zip -q -r "$ASSETS_DIR/bundle.zip" . ) \
   || die "Could not create bundle.zip."
 printf '%s' "$version" > "$ASSETS_DIR/bundle.version"
 
