@@ -194,6 +194,14 @@ with a **spike commit** (§7) whose only job is producing a working `libnode.so`
 - **The make generator, not ninja** (which Termux uses). gyp's ninja generator emits duplicate
   rules for V8's inspector stamp when host and target toolsets are both in play — exactly what a
   cross build does — and fails outright; make handles the dual toolset and only warns.
+- **The host toolchain must be named explicitly — Node's own `android_configure.py` does not,
+  and that is a real gap in it.** It exports `CC`/`CXX` pointing at the NDK, and gyp resolves the
+  host compiler as `CC_host` *falling back to* `CC` (`tools/gyp/pylib/gyp/generator/make.py`), so
+  V8's host tools — `mksnapshot`, `torque`, the bytecode generators, all of which have to run on
+  the build machine — get silently compiled for the phone instead. The build does not fail where
+  the mistake is; it runs for over an hour and then dies on `backtrace_symbols` being undeclared,
+  because bionic's `execinfo.h` gates those behind API 33 while the build targets 28. Exporting
+  `CC_host`/`CXX_host`/`LINK_host`/`AR_host` to the image's own GCC fixes it at the source.
 - Two configure flags are ours rather than Termux's: `--without-node-snapshot`, because
   generating the V8 startup snapshot means running a target binary a cross build cannot run, and
   `--without-npm --without-corepack`, because the phone ships a prebuilt bundle and never

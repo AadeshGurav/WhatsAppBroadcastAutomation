@@ -124,6 +124,18 @@ configure_node() {
   export CXX="$toolchain/bin/${TOOLCHAIN_PREFIX}${ANDROID_API}-clang++"
   [ -x "$CC" ] || die "Cross compiler not found: $CC"
 
+  # V8's build produces tools (mksnapshot, torque) that have to RUN on this
+  # machine, so they must be compiled for it. gyp picks the host compiler with
+  # `CC_host` falling back to `CC` — and `CC` is the Android cross compiler —
+  # so without these the host tools are silently built for the phone and the
+  # build dies partway through on bionic's missing execinfo.h. Node's own
+  # android_configure.py has this gap; naming the host toolchain closes it.
+  export CC_host=gcc
+  export CXX_host=g++
+  export LINK_host=g++
+  export AR_host=ar
+  command -v "$CC_host" >/dev/null || die "Host compiler '$CC_host' not found in the image."
+
   export GYP_DEFINES="target_arch=$GYP_ARCH v8_target_arch=$GYP_ARCH \
 android_target_arch=$GYP_ARCH host_os=$(uname -s | tr '[:upper:]' '[:lower:]') \
 OS=android android_ndk_path=$ndk_root"
