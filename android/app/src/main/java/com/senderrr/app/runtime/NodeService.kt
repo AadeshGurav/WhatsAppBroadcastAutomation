@@ -5,6 +5,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
@@ -50,8 +51,17 @@ class NodeService : Service() {
         return START_STICKY
     }
 
-    /** Nothing binds to the service yet; the watchdog's binder arrives in commit 9. */
-    override fun onBind(intent: Intent?): IBinder? = null
+    /**
+     * The watchdog binds purely to hold a death recipient on this token: when
+     * the `:noderuntime` process goes away, however it goes away, the binder
+     * dies with it and the UI process finds out (ADR-4). There is deliberately
+     * no method on it — cross-process status reporting arrives with the Home
+     * screen, and an interface invented before it has a caller would be guessed,
+     * not designed.
+     */
+    override fun onBind(intent: Intent?): IBinder = lifetimeToken
+
+    private val lifetimeToken = Binder()
 
     private fun startRuntime() {
         if (state.isActive) return
