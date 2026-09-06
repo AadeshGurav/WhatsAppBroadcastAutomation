@@ -1,5 +1,6 @@
 package com.senderrr.app.runtime
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -30,6 +31,7 @@ object BatteryExemption {
      * client can answer where they are is the difference between a step that
      * gets done and one that gets abandoned.
      */
+    @SuppressLint("BatteryLife")  // Play policy; this app is sideloaded (ADR-7).
     fun requestIntent(context: Context): Intent =
         Intent(
             Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,

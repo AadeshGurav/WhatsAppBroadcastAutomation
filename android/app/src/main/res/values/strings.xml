@@ -14,4 +14,20 @@
     <string name="runtime_error_no_library">This build is missing its server runtime. Reinstall the app.</string>
     <string name="runtime_error_no_bundle">No server software is installed yet.</string>
     <string name="runtime_error_exited">it shut down unexpectedly (code %1$d)</string>
+
+    <!-- Home -->
+    <string name="home_start">Start server</string>
+    <string name="home_stop">Stop server</string>
+    <string name="home_advanced">Advanced</string>
+    <string name="home_state_running">Running</string>
+    <string name="home_state_running_detail">Your server is up and handling messages.</string>
+    <string name="home_state_starting">Starting</string>
+    <string name="home_state_starting_detail">Setting up. This can take a minute the first time.</string>
+    <string name="home_state_stopped">Stopped</string>
+    <string name="home_state_stopped_detail">Nothing is running. Tap Start server to bring it up.</string>
+    <string name="home_state_failed">Stopped unexpectedly</string>
+    <string name="home_battery_title">Let Senderrr run in the background</string>
+    <string name="home_battery_body">Without this, Android will shut your server down after a while — usually overnight, without telling you.</string>
+    <string name="home_battery_action">Allow</string>
+
 </resources>

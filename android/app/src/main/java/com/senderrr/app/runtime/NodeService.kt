@@ -27,6 +27,7 @@ import kotlin.concurrent.thread
 class NodeService : Service() {
 
     private lateinit var bundle: BundleLayout
+    private lateinit var status: RuntimeStatusStore
     private var wakeLock: PowerManager.WakeLock? = null
 
     @Volatile
@@ -35,6 +36,7 @@ class NodeService : Service() {
     override fun onCreate() {
         super.onCreate()
         bundle = BundleLayout(this)
+        status = RuntimeStatusStore(this)
         RuntimeNotifications.ensureChannel(this)
     }
 
@@ -126,6 +128,7 @@ class NodeService : Service() {
 
     private fun moveToState(next: RuntimeState, foreground: Boolean = false) {
         state = next
+        status.publish(next)
         val notification = RuntimeNotifications.build(this, next)
 
         if (foreground) {
