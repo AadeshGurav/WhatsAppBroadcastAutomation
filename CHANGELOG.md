@@ -13,6 +13,20 @@ developer or client-facing operator would want to know, not a raw commit-message
 ## [Unreleased]
 
 ### Added
+- **Native Android app (PRD Phase 2, in progress).** A new `android/` module: a sideloadable
+  Senderrr app that runs the whole NestJS server on the phone itself, with no Termux, no `adb`
+  and no terminal. What works so far — the app installs and launches, starts a foreground
+  service that runs the server in its own `:noderuntime` process, unpacks the server into app
+  storage on first run, keeps the CPU awake while it serves, restarts itself if the runtime
+  process dies, and comes back after a reboot. Still to come in this phase: the Home and
+  Advanced screens (PRD commits 12-13). The Termux path (`ANDROID_SETUP.md`) is unaffected and
+  stays supported — the two are independent deployment methods, not a migration with a deadline.
+- `scripts/build-libnode.sh` — cross-compiles the Node 24 runtime as `libnode.so` for Android,
+  inside a pinned Linux toolchain image so the build is the same on any machine. Needed once
+  before building the app; takes a couple of hours cold.
+- `scripts/package-bundle.sh` — packages the compiled server, its production dependencies and
+  the built dashboard into the bundle the app ships and runs. This is the layer that later
+  updates itself over the air without reinstalling the app (PRD ADR-6).
 - `docs/23-android-ndk-migration-prd.md` — the full plan for the native Android app (NDK-embedded Node
   runtime), phased into small reviewable commits with explicit ADRs. See that document for
   architecture and rationale.

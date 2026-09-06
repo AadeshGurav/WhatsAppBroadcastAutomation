@@ -176,6 +176,29 @@ re-verified against the current NDK before being carried forward, not assumed st
 with a **spike commit** (§7) whose only job is producing a working `libnode.so` and proving
 `node::Start()` runs a "hello world" script from it, before any app code is written around it.
 
+**Verified during implementation (amends this ADR with what the build actually needed):**
+- **Node 24.20.0**, the current 24.x LTS, rather than the 24.18.0 Termux was on when this was
+  written — same line, same configure surface. NDK **r28c (28.2.13676358)**, pinned in both the
+  build image and `android/app/build.gradle.kts` so the app and the runtime it loads come from
+  one toolchain.
+- **The SONAME patching the 2016 walkthrough needed is unnecessary.** Node's own `configure.py`
+  sets a plain `.so` suffix for `dest-os=android` and emits `libnode.so` directly from
+  `--shared`. Flagged above as needing re-verification; re-verified, and dropped.
+- **The build must run on Linux, not on the developer's machine.** gyp's make generator emits
+  GNU-linker flags (`--start-group`, `-soname`) for the *host* tools V8 builds along the way,
+  and Apple's linker rejects them outright — a macOS host cannot finish the build at all, which
+  is also why Termux's reference recipe is a Linux one. `scripts/build-libnode.sh` therefore
+  drives the build inside a pinned Linux image, which has the side benefit of making the build
+  identical for every developer and for CI. It is `linux/amd64` because Google ships no
+  aarch64-Linux NDK.
+- **The make generator, not ninja** (which Termux uses). gyp's ninja generator emits duplicate
+  rules for V8's inspector stamp when host and target toolsets are both in play — exactly what a
+  cross build does — and fails outright; make handles the dual toolset and only warns.
+- Two configure flags are ours rather than Termux's: `--without-node-snapshot`, because
+  generating the V8 startup snapshot means running a target binary a cross build cannot run, and
+  `--without-npm --without-corepack`, because the phone ships a prebuilt bundle and never
+  installs a package.
+
 ### ADR-4 — Node runs in its own Android process, supervised by a watchdog
 
 **Context (researched for this PRD):** Documented real-world experience embedding Node in Android
