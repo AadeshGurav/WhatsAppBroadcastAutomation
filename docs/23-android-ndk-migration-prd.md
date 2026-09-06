@@ -202,6 +202,12 @@ with a **spike commit** (§7) whose only job is producing a working `libnode.so`
   the mistake is; it runs for over an hour and then dies on `backtrace_symbols` being undeclared,
   because bionic's `execinfo.h` gates those behind API 33 while the build targets 28. Exporting
   `CC_host`/`CXX_host`/`LINK_host`/`AR_host` to the image's own GCC fixes it at the source.
+- **`--shared-zlib`, matching Termux.** Node's *bundled* zlib calls
+  `android_getCpuFeatures()` for runtime SIMD detection, but `common.gypi` only adds the NDK
+  cpufeatures *include* path and never compiles or links its source, so the link fails on an
+  undefined symbol. Android's own `libz` is an NDK stable API present on every device, so linking
+  it drops the problem instead of patching around it — and makes `libnode.so` smaller. This is the
+  second gap in upstream's Android recipe found here, after the host-toolchain one above.
 - Two configure flags are ours rather than Termux's: `--without-node-snapshot`, because
   generating the V8 startup snapshot means running a target binary a cross build cannot run, and
   `--without-npm --without-corepack`, because the phone ships a prebuilt bundle and never
