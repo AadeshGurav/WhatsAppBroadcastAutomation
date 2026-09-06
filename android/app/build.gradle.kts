@@ -64,6 +64,12 @@ android {
         compose = true
     }
 
+    androidResources {
+        // bundle.zip is already stored uncompressed by scripts/package-bundle.sh;
+        // re-deflating it in the APK only costs the phone CPU on every read.
+        noCompress += "zip"
+    }
+
     packaging {
         jniLibs {
             // libnode.so must stay a real file on disk: the JNI bridge dlopen()s

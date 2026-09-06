@@ -7,3 +7,6 @@ local.properties
 # Produced by scripts/build-libnode.sh, not source (PRD ADR-3)
 app/src/main/jniLibs/
 app/src/main/cpp/nodeheaders/
+
+# Produced by scripts/package-bundle.sh — the app bundle, not source
+app/src/main/assets/

@@ -41,7 +41,10 @@ class NodeRuntimeTest {
             )
         }
 
-        val exitCode = NodeRuntime.runScript(script.absolutePath)
+        val exitCode = NodeRuntime.runScript(
+            scriptPath = script.absolutePath,
+            workingDirectory = context.cacheDir.absolutePath,
+        )
 
         assertEquals("Node exited non-zero", 0, exitCode)
         assertTrue("'$marker' never reached logcat", logcatContains(marker))

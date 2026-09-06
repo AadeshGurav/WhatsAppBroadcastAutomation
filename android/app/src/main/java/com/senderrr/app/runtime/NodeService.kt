@@ -72,21 +72,29 @@ class NodeService : Service() {
             fail(getString(R.string.runtime_error_no_library))
             return
         }
-        if (!bundle.isInstalled) {
-            // Expected on a fresh install until the bundle loader lands
-            // (PRD commit 10) — a plain statement, not a crash.
-            fail(getString(R.string.runtime_error_no_bundle))
-            return
-        }
-
         acquireWakeLock()
 
-        // node::Start() blocks for the life of the server, so it gets its own
-        // thread; the service's main looper stays free to handle stop intents.
+        // Everything below is off the main thread: unpacking the bundle moves
+        // a few hundred megabytes on a first run, and node::Start() then blocks
+        // for the life of the server. The service's looper stays free to handle
+        // a stop intent throughout.
         thread(name = "senderrr-node", isDaemon = false) {
+            val installation = BundleInstaller(this).install()
+            if (installation is BundleInstaller.Result.Failed) {
+                fail(installation.reason)
+                return@thread
+            }
+            if (!bundle.isInstalled) {
+                fail(getString(R.string.runtime_error_no_bundle))
+                return@thread
+            }
+
             val exitCode = try {
                 moveToState(RuntimeState.Running)
-                NodeRuntime.runScript(bundle.entryPoint.absolutePath)
+                NodeRuntime.runScript(
+                    scriptPath = bundle.entryPoint.absolutePath,
+                    workingDirectory = bundle.workingDirectory.absolutePath,
+                )
             } catch (error: Throwable) {
                 Log.e(TAG, "The Node runtime stopped with an error.", error)
                 fail(error.message ?: error::class.java.simpleName)

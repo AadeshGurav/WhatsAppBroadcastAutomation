@@ -44,11 +44,15 @@ object NodeRuntime {
      * Runs [scriptPath] to completion in the embedded runtime and returns Node's
      * exit code, or throws if the native libraries never loaded.
      *
+     * [workingDirectory] becomes the process's cwd before Node starts, because
+     * the server resolves its config, database and media paths against it.
+     *
      * [nodeOptions] are passed to Node itself (before the script path);
      * [scriptArgs] reach the script as `process.argv` entries after it.
      */
     fun runScript(
         scriptPath: String,
+        workingDirectory: String,
         nodeOptions: List<String> = emptyList(),
         scriptArgs: List<String> = emptyList(),
     ): Int {
@@ -62,9 +66,9 @@ object NodeRuntime {
             addAll(scriptArgs)
         }
 
-        Log.i(TAG, "Starting Node with script $scriptPath")
-        return nativeStart(argv.toTypedArray())
+        Log.i(TAG, "Starting Node with script $scriptPath in $workingDirectory")
+        return nativeStart(workingDirectory, argv.toTypedArray())
     }
 
-    private external fun nativeStart(argv: Array<String>): Int
+    private external fun nativeStart(workingDirectory: String, argv: Array<String>): Int
 }

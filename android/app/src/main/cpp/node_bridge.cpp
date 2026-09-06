@@ -102,8 +102,21 @@ std::vector<std::string> ReadJavaStringArray(JNIEnv* env, jobjectArray array) {
 extern "C" JNIEXPORT jint JNICALL
 Java_com_senderrr_app_runtime_NodeRuntime_nativeStart(JNIEnv* env,
                                                       jobject /* this */,
+                                                      jstring working_directory,
                                                       jobjectArray argv) {
     RedirectStdioToLogcat();
+
+    // The server resolves its config, database and media paths against the
+    // working directory, so it has to be set before Node starts rather than
+    // left as whatever Android handed the process (which is "/").
+    const char* cwd = env->GetStringUTFChars(working_directory, nullptr);
+    const int chdir_result = chdir(cwd);
+    if (chdir_result != 0) {
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                            "Could not enter the working directory %s", cwd);
+    }
+    env->ReleaseStringUTFChars(working_directory, cwd);
+    if (chdir_result != 0) return -1;
 
     std::vector<std::string> args = ReadJavaStringArray(env, argv);
     if (args.empty()) {
