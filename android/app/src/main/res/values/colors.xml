@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors the dashboard's tokens (dashboard-ui/src/index.css) so the app
+         and the web dashboard read as one product. -->
+    <color name="senderrr_background">#FFFFFF</color>
+    <color name="senderrr_primary">#10B981</color>
+</resources>

@@ -1,0 +1,81 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+}
+
+android {
+    namespace = "com.senderrr.app"
+    compileSdk = 36
+
+    // Pinned to the NDK scripts/build-libnode.sh cross-compiles libnode.so
+    // with. The app and the runtime it loads must come from the same toolchain.
+    ndkVersion = "28.2.13676358"
+
+    defaultConfig {
+        applicationId = "com.senderrr.app"
+        // API 28 skips the aligned_alloc shim Termux's recipe only needs below
+        // 28 (PRD ADR-3). Raising or lowering this means re-checking that.
+        minSdk = 28
+        targetSdk = 36
+        versionCode = 1
+        versionName = "0.1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            // libnode.so is built for arm64 only; every phone this ships to is
+            // arm64. Adding an ABI means another 1-2 hour libnode build.
+            abiFilters += "arm64-v8a"
+        }
+
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
+
+    buildFeatures {
+        compose = true
+    }
+
+    packaging {
+        jniLibs {
+            // libnode.so must stay a real file on disk: the JNI bridge dlopen()s
+            // it from nativeLibraryDir, and an extracted .so is also what makes
+            // the W^X exec path work for the tunnel binary later (PRD commit 15).
+            useLegacyPackaging = true
+        }
+    }
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.activity.compose)
+
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws the whole UI; this theme only covers the window
+         background and the splash frame before the first composition. -->
+    <style name="Theme.Senderrr" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/senderrr_background</item>
+        <item name="android:statusBarColor">@color/senderrr_background</item>
+    </style>
+</resources>

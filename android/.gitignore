@@ -1,0 +1,9 @@
+# Gradle / Android build output
+.gradle/
+build/
+local.properties
+.cxx/
+
+# Produced by scripts/build-libnode.sh, not source (PRD ADR-3)
+app/src/main/jniLibs/
+app/src/main/cpp/nodeheaders/
