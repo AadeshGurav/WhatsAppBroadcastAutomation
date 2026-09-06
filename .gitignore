@@ -74,3 +74,6 @@ docs/plans/
 CLAUDE.md
 _docs/
 whatsapp-auth/
+
+# Node NDK cross-compile workspace (scripts/build-libnode.sh)
+.ndk-build/
