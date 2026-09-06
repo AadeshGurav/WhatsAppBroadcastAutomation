@@ -48,6 +48,13 @@ code — this document *is* that plan, submitted for approval before Phase 2 sta
 - Every change lands as a small, individually reviewable commit with a name and description a
   reviewer can understand without reading the diff first (§15) — this PRD's phase breakdown in
   §7 is written at that granularity on purpose.
+- The client's data survives phone loss/damage/theft: a daily, client-scheduled backup of the
+  on-device database to the client's own Google Drive, using the Google account and Play Services
+  already present on the phone (ADR-9) — added per client request, §11.
+- The client can get a complete, non-technical picture of one advertising campaign — the campaign
+  itself, every broadcast it ran, and every message's delivery outcome — as a single Excel file,
+  rather than having to ask for that data assembled by hand (ADR-10) — a longstanding client
+  request that the current schema makes genuinely awkward to fulfil today; see ADR-10 for why.
 
 ## 3. Non-goals
 
@@ -273,6 +280,159 @@ shows a real shell would help more than the risk of a client fat-fingering somet
 **Consequences:** none of the Phase 2 UI commits build a shell; "log tail + diagnostics" is the
 v1 scope for Advanced, called out explicitly so it isn't quietly re-scoped mid-build.
 
+### ADR-9 — Daily database backup to the client's own Google Drive
+
+**Context:** client request — since the app runs on Android, it can use the Google account
+already signed into the phone (Play Services/GAPPS) rather than asking the client to manage their
+own off-device backup storage. This extends Phase 4's "nightly DB dump off-device" (commit 21),
+which already establishes *that* a dump happens; ADR-9 is about *where it goes* and *how consent
+and scheduling work*.
+
+**Decision, researched rather than assumed:**
+- **Sign-in and authorization are two separate steps, using current (non-deprecated) Google
+  APIs.** Google's own guidance is explicit that the legacy `GoogleSignInClient`/
+  `GoogleSignInOptions` API is deprecated for new work. The current split: **Credential Manager**
+  for authentication (who is this), and a separate **`AuthorizationClient`** call
+  (`Identity.getAuthorizationClient(activity).authorize(...)`) for the specific Drive scope,
+  requested only when the client actually enables backup in Settings — not bundled into a generic
+  sign-in step nobody asked for (this is also §11.1 heuristic 5, error prevention through good
+  defaults, and Google's own stated rationale: "avoid overwhelming new users… as to why they are
+  being asked for certain permissions").
+- **Scope: `drive.file`, with a visible, named app folder ("Senderrr Backups") — not the hidden
+  `appDataFolder`.** Researched both: `appDataFolder` is completely hidden from the user in the
+  Drive UI, can't be shared, and can't be browsed or downloaded except through the app itself.
+  For a technical/ops backup that's the more common default (no clutter in the user's Drive), but
+  for *this* client — a business owner who explicitly asked to see this data protected — an
+  invisible backup they can never independently verify, download, or hand to a bookkeeper is a
+  worse fit: it satisfies §18.2's "doesn't lose their data" on paper while failing §11.1 heuristic
+  1 (visibility of system status) in practice, since nothing in the Drive UI itself ever confirms
+  the backup is real. A visible `drive.file`-scoped folder costs nothing extra to implement and
+  lets the client see file names, sizes, and dates directly in their own Drive app as independent
+  proof it's working.
+- **The interactive consent step is native (unavoidable — Google's consent screen needs an
+  Activity); the recurring backup itself is a plain NestJS scheduled job, not a native Android
+  scheduler.** `AuthorizationClient`'s offline-access flow yields a one-time server auth code,
+  which the native Settings screen hands to the already-running Node backend over `localhost`;
+  Node exchanges it for a refresh token once and stores it itself. From then on, backup is just
+  another job for `@nestjs/schedule` — **already a project dependency** (`package.json`,
+  `@nestjs/schedule@^6.1.3`) — using its `SchedulerRegistry` to add/replace a single cron job at
+  the time-of-day the client picks in Settings, persisted as a plain (non-secret) row in the
+  existing `runtime_settings` key/value table (`database/entities/wa-automation/
+  runtime-setting.entity.ts` — already exists, already the right place for this, no new table).
+  **Android's `WorkManager` is deliberately not used here**: WorkManager exists to run work
+  reliably when your process *isn't* continuously alive, which doesn't describe this app — Route
+  C's entire premise (ADR-2) is a Node process running 24/7 in a foreground service, so an
+  in-process cron job is simpler and already the pattern the rest of the scheduled/background work
+  in this codebase uses (anti-ban pacing, broadcast dispatch). Reaching for WorkManager anyway
+  would be exactly the kind of unjustified pattern §4.1/§4.5 warns against adopting without a
+  concrete failure it answers.
+- **The refresh token is a secret and is stored like one, not like the time-of-day setting next to
+  it.** Google's own guidance for this exact flow states refresh tokens "should be stored securely
+  on the backend server only" — here, the phone's own Node process *is* that backend server, so
+  the token goes into the same Android Keystore-backed encrypted store already planned for the
+  Cloudflare Tunnel token (Phase 3, commit 16), never into `runtime_settings.value` in plaintext
+  next to the non-secret backup-hour setting (§7 — no secrets in source or in an unencrypted
+  app-private file).
+- **Upload via a direct, minimal call to the Drive REST v3 `files.create` (multipart) endpoint
+  using `axios`** (already a project dependency), not the full `googleapis` Node SDK — the surface
+  needed (refresh an access token, upload one file to one folder on a timer) is narrow enough that
+  pulling in Google's large, general-purpose SDK is a dependency-weight decision that doesn't pay
+  for itself here (§10 — "every new dependency is a decision, not a default"). Revisit if the
+  manual implementation proves fragile in practice.
+
+**Alternatives considered:** Android's system-level "Back up my data" (Auto Backup for Apps) —
+rejected; it backs up app state for app *reinstall/device-transfer* scenarios, isn't
+client-schedulable to a specific time, and doesn't produce a file the client can see or hand to
+someone else. `appDataFolder` scope — rejected above for hiding the evidence backups work.
+WorkManager-driven upload — rejected above as solving a problem (surviving process death) this
+app's own architecture (ADR-2, ADR-4) already doesn't have.
+
+**Consequences:** requires Google Play Services on the device — the large majority of
+consumer/business Android phones, but not a de-Googled or Huawei-without-GMS device. Per §4.6
+graceful degradation: if Play Services or Google Sign-In isn't available, the existing local
+nightly dump (commit 21) still runs unaffected, and Settings tells the client plainly that
+Drive backup isn't available on this device rather than failing silently or crashing. New
+dependencies: none on the native side beyond `play-services-auth` (already the standard way to do
+any Google sign-in on Android); on the Node side, none beyond what's already in `package.json`
+(`axios`) for the REST calls — no `googleapis` SDK, no new scheduler package.
+
+### ADR-10 — Unified Excel export for campaign + broadcast + delivery data
+
+**Context:** longstanding client request — export one advertising campaign's data as an Excel
+file. Investigated the actual schema (not assumed) before designing this, per §2's "index the
+relevant parts of the codebase… don't guess at structure — look":
+
+- An advertising campaign is an `Advertisement` (`advertisements` table: title, body, target type,
+  status, package days/days used), with its own `AdTemplate` rows and `MediaAttachment`s.
+- Delivery activity lives three tables away and **is not enforced as a relation to the
+  campaign**: `BroadcastEvent` (`broadcast_events`) — one row per send-out — carries
+  `advertisementId`/`advertisementTitle` as **nullable, denormalized columns**, not a
+  `@ManyToOne(() => Advertisement)` foreign key. From there, `MessageTask` (`message_tasks`) has a
+  real FK to `BroadcastEvent` and to the target `WhatsAppGroup` (one row per group a broadcast was
+  sent to — status, `waMessageId`, error category/message, attempt count), and `MessageAttempt`
+  (`message_attempts`) has a real FK to `MessageTask` (one row per retry — attempt number, status,
+  error, response time). This is precisely the "scattered, not in the same table" problem
+  described: a campaign's full picture is a four-table join, and the weakest link
+  (`advertisementId` on `broadcast_events`) isn't even a real foreign key today.
+- `BroadcastEvent` can optionally reference a `ScrapedArticle` — relevant here because this
+  client's actual usage pattern (per the link-preview work already shipped) is broadcasting
+  scraped news articles, so the article's title/URL belongs in the export alongside the message
+  text, not as an afterthought.
+
+**Decision:**
+- **Ship the export as a real API endpoint** (`GET /v1/advertisements/:id/export.xlsx`, per §4.7's
+  contract — a noun-based resource route, not `/exportCampaignData`), not a client-side/dashboard
+  computation — the join spans four tables and hundreds to thousands of rows for an active
+  campaign, which belongs server-side.
+- **Four sheets, ordered from summary to detail, matching how a non-technical business user
+  thinks about "a campaign" rather than the raw table names (§11.1 heuristic 2, match the real
+  world):**
+  1. **Campaign Summary** — one row: title, status, target type, package days/days used, template
+     count, total broadcasts, total sent/failed across all its broadcasts.
+  2. **Broadcasts** — one row per `BroadcastEvent`: article title/link (if present), message text,
+     status, sent/failed counts, started/completed timestamps.
+  3. **Message Log** — one row per `MessageTask`: which broadcast, which group, delivery status,
+     WhatsApp message id, attempt count, last attempt time, error category/message if failed. This
+     is the sheet that answers "did group X actually get it."
+  4. **Retry Detail** (opt-in, off by default) — one row per `MessageAttempt`, for when someone
+     needs the full retry-by-retry trail. Off by default per Hick's Law/§11.1 heuristic 8: most
+     requests for "the campaign data" mean sheets 1–3, and a busy campaign's attempt-level detail
+     can run to tens of thousands of rows — showing it unconditionally would bury the sheet people
+     actually want.
+- **`exceljs`, not `xlsx`(SheetJS) or `node-xlsx`.** Researched current (2026) status of all
+  three: SheetJS has the widest format support but "limited" styling; `node-xlsx` has none;
+  `exceljs` is purpose-built for exactly this — a formatted, multi-sheet report with headers,
+  column widths, and number/date formatting — and remains actively maintained (~1.9M weekly
+  downloads). This is a new dependency (§10) — justified because none of the project's existing
+  dependencies cover spreadsheet generation, and the styling requirement rules out the two
+  lighter alternatives.
+- **Single-campaign export runs synchronously**; a future "export all campaigns in a date range"
+  request (not asked for yet, noted for later) should reuse the project's existing
+  job-id-plus-Socket.IO-report pattern already used for other long operations (the broadcast
+  dispatcher), rather than inventing a second async-job mechanism.
+- **A broadcast row that doesn't match any campaign (possible today precisely because there's no
+  enforced FK) is never silently dropped from the export** — per §8 ("errors never pass silently"),
+  it's surfaced as its own "Unlinked broadcasts" row set rather than vanishing, so a data-integrity
+  gap shows up as a visible anomaly the client can ask about, not a quietly incomplete report.
+- **Flagged, not silently fixed: the missing FK between `broadcast_events.advertisementId` and
+  `advertisements.id`.** The export's join can work against the existing loose columns as-is,
+  but a proper foreign key (plus a migration to backfill/validate existing rows) would make this
+  data integrity guarantee real instead of conventional. That's a schema change and gets its own
+  approval per §2.5 rather than being bundled invisibly into the export feature — listed as an
+  open question, §9.
+
+**Alternatives considered:** building the export as a dashboard-side (React) computation over
+several existing REST calls — rejected, the join and row counts belong server-side, and a
+client-side approach would need to fetch every table fully to reconstruct joins the database
+already knows how to do. Including retry-level detail unconditionally — rejected per Hick's Law
+above.
+
+**Consequences:** this feature is genuinely independent of the Android/NDK work in the rest of
+this PRD — it's a backend/dashboard change that works identically on the current Docker/Termux
+deployments and the future native app. It's included here because it was requested alongside the
+Drive-backup work, not because it depends on or blocks the Android phases; it can ship on its own
+timeline (§7, Phase 8).
+
 ---
 
 ## 6. Risk register
@@ -286,6 +446,9 @@ v1 scope for Advanced, called out explicitly so it isn't quietly re-scoped mid-b
 | GPLv3 compliance gap in manual distribution process | Low | High — legal | Phase 6 checklist item makes "hand over current source" an explicit, non-skippable release step (ADR-7) |
 | Ban-risk under Baileys at scale | Unknown (carried over) | High | Already flagged in the existing project doc; unchanged by this PRD — soak plan in Phase 6 |
 | Battery degradation from 24/7 charging | Certain, slow | Low–Medium | Charge-limit setting or smart plug, budget a phone battery replacement (unchanged from existing doc) |
+| Client's phone has no Google Play Services (de-Googled, some Huawei models) | Low | Medium — no Drive backup | Local nightly dump (Phase 4, commit 21) still runs regardless; Settings states plainly that Drive backup isn't available on this device (ADR-9) |
+| Manual Drive REST integration (no `googleapis` SDK) misses an edge case the SDK would have handled | Low–Medium | Low — retried on next scheduled run | One backup a day means a single failed run is not data loss (the local dump still exists); revisit the SDK if failures recur (ADR-9) |
+| `broadcast_events.advertisementId` has no enforced FK — a row could reference a deleted/wrong campaign | Low | Medium — export could join to nothing or the wrong campaign | Export handles a missing match by showing the row under "Unlinked broadcasts" rather than dropping it silently (§8); formal FK is a separate, explicitly-approved schema change (ADR-10, open questions) |
 
 ---
 
@@ -408,6 +571,44 @@ follow-up.** Phase 0/1 are already done; they're listed for continuity.
     an afterthought.
 32. **`docs: final PRD + CHANGELOG update marking the NDK app v1 shipped`**.
 
+### Phase 7 — Google Drive backup (ADR-9; depends on Phase 4's data layer and Phase 3's
+encrypted-token storage pattern; otherwise independent of Phases 5/6)
+
+33. **`feat(android): Settings screen — "Connect Google Drive" via Credential Manager +
+    AuthorizationClient`** — the one-time interactive consent flow (ADR-9); no scope requested
+    until the client actually enables backup. Verification: consent screen shows only the Drive
+    scope, not a bundle of unrelated permissions (§11.1 heuristic 5).
+34. **`feat(data): exchange the one-time auth code for a refresh token and store it encrypted`** —
+    Node-side; reuses the Keystore-backed secret store from Phase 3, commit 16. Verification: the
+    plaintext refresh token never appears in `runtime_settings`, logs, or a crash dump (§7).
+35. **`feat(data): daily Drive backup as an @nestjs/schedule cron job, time set in Settings`** —
+    uploads the existing nightly dump (Phase 4, commit 21) to a visible "Senderrr Backups" Drive
+    folder via a direct Drive REST v3 call. Verification: a real Google account shows the file
+    appear in Drive at the scheduled time, with the correct name/timestamp, from a real device.
+36. **`feat(android): backup status shown in Settings (last success time, last error)`** — §11.1
+    heuristic 1, visibility of system status; a backup nobody can see happened isn't trusted.
+37. **`feat(data): graceful degradation when Play Services/Drive is unavailable`** — local dump
+    keeps running; Settings states plainly that Drive backup isn't available on this device (§4.6,
+    ADR-9). Verification: tested on a Play-Services-less build/device, no crash, clear message.
+38. **`docs: update PRD + CHANGELOG + ANDROID_SETUP.md with the Drive backup setup flow`**.
+
+### Phase 8 — Campaign reporting: unified Excel export (ADR-10; independent of the Android work,
+can ship on the current Docker/Termux deployments before or after Phase 2–7)
+
+39. **`feat(reporting): add exceljs dependency and the export endpoint skeleton`** —
+    `GET /v1/advertisements/:id/export.xlsx`, returns the Campaign Summary sheet only.
+    Verification: opens cleanly in Excel/LibreOffice/Google Sheets with correct headers.
+40. **`feat(reporting): Broadcasts and Message Log sheets`** — the four-table join described in
+    ADR-10, including the "Unlinked broadcasts" handling for rows with no matching campaign.
+    Verification: a manually-constructed test campaign with a mix of sent/failed/retried messages
+    produces a file whose sheet 3 row count matches `message_tasks` exactly.
+41. **`feat(reporting): opt-in Retry Detail sheet`** — off by default, one query param to include
+    it. Verification: response size/time stays reasonable with the sheet excluded on a
+    large-campaign fixture.
+42. **`docs: update PRD + CHANGELOG + relevant API docs (docs/06-api-specification.md) with the
+    export endpoint`** — per §4.7, the API spec is a first-class artifact updated in the same
+    change that adds the endpoint, not left to drift.
+
 ---
 
 ## 8. Testing strategy (§6)
@@ -424,6 +625,13 @@ follow-up.** Phase 0/1 are already done; they're listed for continuity.
   emulators don't reproduce faithfully.
 - **A bug fix gets a regression test** (§6) — applies going forward once Phase 2 code exists to
   regress.
+- **Drive backup (Phase 7):** verified on a real device with a real Google account per §9's
+  "real device in the loop" — Credential Manager/AuthorizationClient consent screens are Play
+  Services UI that an emulator without Play Services can't reproduce.
+- **Excel export (Phase 8):** the existing Jest suite gets a new spec asserting the join's row
+  counts against a seeded fixture (campaign → broadcasts → tasks → attempts) match the source
+  tables exactly, and that a broadcast with no matching campaign lands in "Unlinked broadcasts"
+  rather than being dropped (§6 — "especially anything with a decision branch").
 
 ## 9. Open questions
 
@@ -439,6 +647,12 @@ follow-up.** Phase 0/1 are already done; they're listed for continuity.
   filling in before Phase 6's cutover.
 - **One client or a product?** — carried over; changes whether the ffmpeg/voice-note gap (existing
   project doc) is worth solving before v1 or after.
+- **Should `broadcast_events.advertisementId` become a real foreign key?** — ADR-10 deliberately
+  leaves this open rather than bundling a schema change into the export feature; needs its own
+  §2.5 approval, including a migration plan for existing rows that may not cleanly match.
+- **Is a visible "Senderrr Backups" Drive folder actually what the client wants**, or would they
+  prefer the backup fully hidden from the normal Drive UI? ADR-9 reasons toward visible/trust, but
+  this is a preference worth confirming directly rather than assuming.
 
 ## 10. Sources consulted for this PRD
 
@@ -450,4 +664,12 @@ follow-up.** Phase 0/1 are already done; they're listed for continuity.
 - [digidem/better-sqlite3-nodejs-mobile](https://github.com/digidem/better-sqlite3-nodejs-mobile) and [staltz/prebuild-for-nodejs-mobile](https://github.com/staltz/prebuild-for-nodejs-mobile) — evidence that native SQLite cross-compilation for a mobile-embedded Node ABI is a solved-but-fiddly problem, informing ADR-5's spike-then-fallback structure.
 - `claude/senderrr-on-android-phone-plan.md` (this project's own prior doc) — Route A/B/C
   comparison, RAM budgets, feature ledger, migration phase 0/1 — the basis this PRD extends.
+- [Google — Store application-specific data (appDataFolder)](https://developers.google.com/workspace/drive/api/guides/appdata) — confirmed appDataFolder is fully hidden from the Drive UI and unshareable, informing ADR-9's choice of a visible `drive.file` folder instead.
+- [Android Developers — Authorize access to Google user data](https://developer.android.com/identity/authorization) — confirmed `GoogleSignInClient`/`GoogleSignInOptions` are legacy; current guidance is Credential Manager (authentication) + `AuthorizationClient` (scoped authorization), requested on demand, with refresh tokens stored server-side — the basis for ADR-9's whole flow.
+- [PkgPulse — SheetJS vs ExcelJS vs node-xlsx in Node, 2026](https://www.pkgpulse.com/guides/sheetjs-vs-exceljs-vs-node-xlsx-excel-files-node-2026) — confirmed `exceljs` remains actively maintained and is the styling-capable choice for a multi-sheet formatted report, informing ADR-10.
+- This project's own entities (`database/entities/wa-automation/advertisement.entity.ts`,
+  `ad-template.entity.ts`, `broadcast-event.entity.ts`, `message-task.entity.ts`,
+  `message-attempt.entity.ts`, `runtime-setting.entity.ts`) and `package.json` — read directly
+  (§2) to ground ADR-10's join design and confirm `@nestjs/schedule` was already a dependency
+  before proposing ADR-9's scheduling approach.
 - `CLAUDE.md` (attached) — governs every structural and process decision in this document.
