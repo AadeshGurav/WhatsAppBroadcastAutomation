@@ -8,6 +8,11 @@
     <!-- The server must keep serving while the screen is off; without this the
          phone sleeps and the client's broadcasts stop overnight. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Restricted on Play, which this app does not ship through (ADR-7).
+         Without it the client's server dies quietly hours after they stop
+         looking at it, which reads as everything being fine. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".SenderrrApplication"
@@ -40,6 +45,16 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Runs the device owner's own self-hosted Senderrr automation server, which must stay reachable continuously." />
         </service>
+
+        <!-- Exported because the sender is the system, not this app. -->
+        <receiver
+            android:name=".runtime.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
