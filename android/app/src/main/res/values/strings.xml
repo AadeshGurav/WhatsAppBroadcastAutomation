@@ -30,4 +30,14 @@
     <string name="home_battery_body">Without this, Android will shut your server down after a while — usually overnight, without telling you.</string>
     <string name="home_battery_action">Allow</string>
 
+    <!-- Advanced -->
+    <string name="advanced_title">Advanced</string>
+    <string name="advanced_warning_title">Only continue if you know what you\'re doing</string>
+    <string name="advanced_warning_body">This screen shows the server\'s raw activity and lets you restart it. Actions here can stop your server and interrupt messages that are being sent.</string>
+    <string name="advanced_warning_back">Take me back</string>
+    <string name="advanced_warning_continue">I understand, continue</string>
+    <string name="advanced_restart">Restart server</string>
+    <string name="advanced_copy_logs">Copy logs</string>
+    <string name="advanced_back">Back to home</string>
+    <string name="advanced_logs_empty">Nothing logged yet. Activity appears here as the server runs.</string>
 </resources>

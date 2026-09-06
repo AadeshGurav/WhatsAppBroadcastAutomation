@@ -12,12 +12,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.senderrr.app.runtime.BatteryExemption
+import com.senderrr.app.ui.advanced.AdvancedScreen
+import com.senderrr.app.ui.advanced.AdvancedViewModel
 import com.senderrr.app.ui.home.HomeScreen
 import com.senderrr.app.ui.home.HomeViewModel
 import com.senderrr.app.ui.theme.SenderrrTheme
@@ -68,6 +73,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun SenderrrApp(modifier: Modifier, onGrantBatteryExemption: () -> Unit) {
         val home: HomeViewModel = viewModel()
+        val advanced: AdvancedViewModel = viewModel()
 
         // Permissions can be revoked outside the app, so Home re-checks every
         // time it comes forward rather than trusting what it saw at startup.
@@ -76,16 +82,30 @@ class MainActivity : ComponentActivity() {
             onPauseOrDispose { }
         }
 
+        var isShowingAdvanced by rememberSaveable { mutableStateOf(false) }
         val homeState by home.uiState.collectAsStateWithLifecycle()
+        val isWarningAccepted by advanced.isWarningAccepted.collectAsStateWithLifecycle()
+        val logLines by advanced.logLines.collectAsStateWithLifecycle()
 
-        HomeScreen(
-            state = homeState,
-            onStart = home::startServer,
-            onStop = home::stopServer,
-            onGrantBatteryExemption = onGrantBatteryExemption,
-            // The Advanced screen arrives in the next commit (ADR-8).
-            onOpenAdvanced = { },
-            modifier = modifier,
-        )
+        if (isShowingAdvanced) {
+            AdvancedScreen(
+                isWarningAccepted = isWarningAccepted,
+                logLines = logLines,
+                onAcceptWarning = advanced::acceptWarning,
+                onBack = { isShowingAdvanced = false },
+                onRestartServer = advanced::restartServer,
+                onCopyLogs = advanced::copyLogs,
+                modifier = modifier,
+            )
+        } else {
+            HomeScreen(
+                state = homeState,
+                onStart = home::startServer,
+                onStop = home::stopServer,
+                onGrantBatteryExemption = onGrantBatteryExemption,
+                onOpenAdvanced = { isShowingAdvanced = true },
+                modifier = modifier,
+            )
+        }
     }
 }
