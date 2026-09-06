@@ -7,6 +7,13 @@ no coding, no computer required. Once it's done, that phone runs Senderrr
 Expect this to take **30–45 minutes** the first time, most of it waiting for
 downloads and installs.
 
+This is the Termux-based setup — the fastest way to get Senderrr running on a
+phone today. A dedicated Senderrr Android app (no Termux, install one APK,
+updates itself) is planned next; see
+[`docs/23-android-ndk-migration-prd.md`](docs/23-android-ndk-migration-prd.md)
+if you want the full roadmap. This guide will keep working after that app
+ships — it isn't going away.
+
 ## What you'll need
 
 - **An Android phone** you can dedicate to this (it won't be usable as a

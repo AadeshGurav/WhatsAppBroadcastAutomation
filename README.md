@@ -55,6 +55,13 @@ turning a spare phone into a 24/7 Senderrr server, including a single setup
 script (`scripts/setup-android.sh`) that installs everything, generates the
 required secrets, and configures internet access automatically.
 
+This Termux-based setup is the fast, interim way to run Senderrr on a phone.
+A native Android app that embeds Node directly (no Termux, one APK, automatic
+updates) is planned next — see
+[`docs/23-android-ndk-migration-prd.md`](docs/23-android-ndk-migration-prd.md)
+for the full plan. The Termux path stays supported alongside it, not replaced
+by it, until the native app has shipped and proven itself.
+
 ## Documentation
 
 The [`docs/`](docs/) directory has the full reference set: requirements,
@@ -63,6 +70,8 @@ operational runbooks, troubleshooting, and more — see
 [`docs/21-glossary.md`](docs/21-glossary.md) if you're looking for a specific
 term, or [`docs/12-troubleshooting-faq.md`](docs/12-troubleshooting-faq.md)
 for common issues.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for what's changed recently.
 
 ## License
 
