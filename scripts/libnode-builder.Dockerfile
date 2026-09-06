@@ -18,9 +18,11 @@ ARG NDK_VERSION=28.2.13676358
 ARG NDK_RELEASE=r28c
 
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Split from the build tools below so that changing those does not force the
+# NDK — a 600 MB download — to be fetched again.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl unzip xz-utils \
-        build-essential python3 python3-venv git \
     && rm -rf /var/lib/apt/lists/*
 
 # The build script looks for the NDK under $ANDROID_SDK_ROOT/ndk/<version>,
@@ -32,5 +34,12 @@ RUN mkdir -p "$ANDROID_SDK_ROOT/ndk" \
     && unzip -q /tmp/ndk.zip -d /tmp \
     && mv "/tmp/android-ndk-${NDK_RELEASE}" "$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" \
     && rm /tmp/ndk.zip
+
+# zlib1g-dev is for the *host* half of the build: --shared-zlib applies to both
+# toolsets, so the tools V8 and ICU build to run here need zlib too, not just
+# the Android target (which links the NDK's own libz).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential python3 python3-venv git zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

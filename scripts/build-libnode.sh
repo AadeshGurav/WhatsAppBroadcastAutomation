@@ -22,7 +22,6 @@
 
 set -euo pipefail
 
-readonly IMAGE_TAG="senderrr/libnode-builder:ndk-28.2.13676358"
 readonly ANDROID_ABI="${ANDROID_ABI:-arm64-v8a}"
 
 readonly GREEN='\033[0;32m' RED='\033[0;31m' BLUE='\033[0;34m' BOLD='\033[1m' NC='\033[0m'
@@ -39,6 +38,13 @@ command -v docker >/dev/null \
 docker info >/dev/null 2>&1 \
   || die "The container runtime is installed but not running. Start it and try again."
 
+# Tagged by the recipe's own content, so editing the Dockerfile builds a new
+# image instead of silently reusing a stale one — the kind of drift that shows
+# up much later as a build that works on one machine and not another.
+readonly DOCKERFILE="$SCRIPT_DIR/libnode-builder.Dockerfile"
+hash_file() { { shasum -a 256 "$1" 2>/dev/null || sha256sum "$1"; } | cut -c1-12; }
+readonly IMAGE_TAG="senderrr/libnode-builder:$(hash_file "$DOCKERFILE")"
+
 log_step "Toolchain image"
 if docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
   log_info "$IMAGE_TAG already built."
@@ -46,7 +52,7 @@ else
   log_info "Building $IMAGE_TAG (one-off, downloads the Android NDK)."
   docker build --platform linux/amd64 \
     -t "$IMAGE_TAG" \
-    -f "$SCRIPT_DIR/libnode-builder.Dockerfile" \
+    -f "$DOCKERFILE" \
     "$SCRIPT_DIR" \
     || die "Could not build the toolchain image."
   log_success "Image ready."
