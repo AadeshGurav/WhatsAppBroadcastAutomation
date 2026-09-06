@@ -17,6 +17,12 @@ developer or client-facing operator would want to know, not a raw commit-message
   runtime), phased into small reviewable commits with explicit ADRs. See that document for
   architecture and rationale.
 - This changelog.
+- PRD: ADR-9 (daily database backup to the client's own Google Drive, via Credential Manager +
+  AuthorizationClient, scheduled through the existing `@nestjs/schedule` dependency) and ADR-10
+  (unified Excel export joining a campaign, its broadcasts, and their per-group delivery/retry
+  logs — currently spread across four tables with no enforced link between the campaign and its
+  broadcasts) — both client requests, added as Phase 7 and Phase 8 with the same commit-by-commit
+  breakdown as the rest of the plan.
 
 ## 2026-09-06
 
