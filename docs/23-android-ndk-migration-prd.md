@@ -194,6 +194,14 @@ with a **spike commit** (§7) whose only job is producing a working `libnode.so`
 - **The make generator, not ninja** (which Termux uses). gyp's ninja generator emits duplicate
   rules for V8's inspector stamp when host and target toolsets are both in play — exactly what a
   cross build does — and fails outright; make handles the dual toolset and only warns.
+- **Node's bundled `android-patches/trap-handler.h.patch` is required, and upstream applies it
+  only on Linux hosts** (`android_configure.py` guards it with `platform.system() == "Linux"`).
+  It disables V8's WebAssembly trap handler. Reading the header suggests it is unnecessary for an
+  arm64 Android target — every branch that enables the handler excludes Android — and that reading
+  is wrong, because it only considers the target. The *host* tools are x86_64 Linux, where the same
+  header says the handler IS supported, so `mksnapshot` references `TryHandleSignal` while gyp,
+  keyed on the target OS, never compiled its implementation. The build reaches the very last host
+  link before saying so. Cost of the patch: WebAssembly traps fall back to bounds checks.
 - **The host toolchain must be named explicitly — Node's own `android_configure.py` does not,
   and that is a real gap in it.** It exports `CC`/`CXX` pointing at the NDK, and gyp resolves the
   host compiler as `CC_host` *falling back to* `CC` (`tools/gyp/pylib/gyp/generator/make.py`), so

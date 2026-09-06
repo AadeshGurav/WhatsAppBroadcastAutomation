@@ -96,6 +96,32 @@ fetch_node_source() {
   log_success "Extracted to $SOURCE_DIR"
 }
 
+# ── Patch ───────────────────────────────────────────────────────────────────
+# Node ships one patch for Android builds and applies it from
+# android_configure.py. It disables V8's WebAssembly trap handler outright.
+#
+# It is genuinely required, and the reason is not obvious: the *target* build
+# does not want the trap handler (Android is excluded from every branch in that
+# header), so gyp never compiles the handler's implementation — but the *host*
+# tools are built for x86_64 Linux, where the same header says the trap handler
+# IS supported. mksnapshot then references TryHandleSignal and nothing defines
+# it. The build gets all the way to linking mksnapshot before saying so.
+apply_android_patches() {
+  local header="$SOURCE_DIR/deps/v8/src/trap-handler/trap-handler.h"
+
+  grep -q "V8_TRAP_HANDLER_SUPPORTED true" "$header" || {
+    log_info "Android patches already applied."
+    return
+  }
+
+  log_step "Applying Node's Android patches"
+  ( cd "$SOURCE_DIR" \
+      && patch -f ./deps/v8/src/trap-handler/trap-handler.h \
+           < ./android-patches/trap-handler.h.patch ) \
+    || die "Could not apply the trap-handler patch."
+  log_success "Patched deps/v8/src/trap-handler/trap-handler.h"
+}
+
 # ── Configure ───────────────────────────────────────────────────────────────
 # Mirrors node's own android_configure.py, with three deliberate additions:
 #   --shared              emit libnode.so rather than a `node` executable
@@ -213,6 +239,7 @@ main() {
   log_step "Senderrr libnode.so build — Node $NODE_VERSION, NDK $NDK_VERSION, $ANDROID_ABI"
   require_linux_host
   fetch_node_source
+  apply_android_patches
   configure_node
   build_node
   stage_artifacts
