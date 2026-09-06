@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 /**
  * PRD commit 4's acceptance test, and commit 7's: prove that a script handed to
  * the JNI bridge actually executes inside the cross-compiled libnode.so on a
- * real device, and that its stdout reaches logcat.
+ * real device, and that its stdout is captured.
  *
  * `node::Start()` can only be called once per process, so this is deliberately
  * a single test: a second one would run in the same instrumentation process and
@@ -41,26 +41,26 @@ class NodeRuntimeTest {
             )
         }
 
+        val logFile = File(context.cacheDir, "runtime-test.log").apply { delete() }
+
         val exitCode = NodeRuntime.runScript(
             scriptPath = script.absolutePath,
             workingDirectory = context.cacheDir.absolutePath,
+            logFile = logFile.absolutePath,
         )
 
         assertEquals("Node exited non-zero", 0, exitCode)
-        assertTrue("'$marker' never reached logcat", logcatContains(marker))
+        assertTrue("'$marker' was never captured from Node's output", logContains(logFile, marker))
     }
 
-    /** Reads the log buffer this process has written since the run started. */
-    private fun logcatContains(needle: String): Boolean {
+    /**
+     * Checks the file the bridge writes Node's output to — not logcat, which an
+     * app cannot reliably read on an OEM device (see LogTail).
+     */
+    private fun logContains(logFile: File, needle: String): Boolean {
         // The pump thread forwards Node's stdout asynchronously; give it a
         // moment rather than racing it.
         TimeUnit.MILLISECONDS.sleep(500)
-
-        val process = ProcessBuilder("logcat", "-d", "-s", "SenderrrNode:I")
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        process.waitFor(10, TimeUnit.SECONDS)
-        return output.contains(needle)
+        return logFile.isFile && logFile.readText().contains(needle)
     }
 }

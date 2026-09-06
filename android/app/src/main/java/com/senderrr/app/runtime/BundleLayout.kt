@@ -43,6 +43,13 @@ class BundleLayout(context: Context) {
      */
     val entryPoint: File = File(workingDirectory, "dist/src/main.js")
 
+    /**
+     * Everything the runtime prints. It lives with the data rather than in the
+     * bundle, so a bundle swap does not throw away the log of what happened
+     * before it — which is exactly the log someone wants after a bad update.
+     */
+    val logFile: File = File(workingDirectory, "logs/runtime.log")
+
     /** The bundle entries [workingDirectory] links to, named as the server expects them. */
     val linkedEntries: List<String> = listOf("dist", "node_modules", "dashboard-ui", "package.json")
 

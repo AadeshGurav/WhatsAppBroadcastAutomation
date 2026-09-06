@@ -46,6 +46,8 @@ object NodeRuntime {
      *
      * [workingDirectory] becomes the process's cwd before Node starts, because
      * the server resolves its config, database and media paths against it.
+     * [logFile] receives everything Node prints, which is what the Advanced
+     * screen tails.
      *
      * [nodeOptions] are passed to Node itself (before the script path);
      * [scriptArgs] reach the script as `process.argv` entries after it.
@@ -53,6 +55,7 @@ object NodeRuntime {
     fun runScript(
         scriptPath: String,
         workingDirectory: String,
+        logFile: String,
         nodeOptions: List<String> = emptyList(),
         scriptArgs: List<String> = emptyList(),
     ): Int {
@@ -67,8 +70,12 @@ object NodeRuntime {
         }
 
         Log.i(TAG, "Starting Node with script $scriptPath in $workingDirectory")
-        return nativeStart(workingDirectory, argv.toTypedArray())
+        return nativeStart(workingDirectory, logFile, argv.toTypedArray())
     }
 
-    private external fun nativeStart(workingDirectory: String, argv: Array<String>): Int
+    private external fun nativeStart(
+        workingDirectory: String,
+        logFile: String,
+        argv: Array<String>,
+    ): Int
 }

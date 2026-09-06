@@ -10,7 +10,6 @@ import com.senderrr.app.runtime.NodeService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -47,15 +46,7 @@ class AdvancedViewModel(application: Application) : AndroidViewModel(application
 
     private fun streamLogs() {
         viewModelScope.launch {
-            LogTail.stream().collect { line ->
-                // Bounded, so a server that logs all day cannot grow this
-                // without limit while the screen is open.
-                _logLines.update { (it + line).takeLast(MAX_VISIBLE_LINES) }
-            }
+            LogTail(getApplication()).stream().collect { lines -> _logLines.value = lines }
         }
-    }
-
-    private companion object {
-        const val MAX_VISIBLE_LINES = 500
     }
 }

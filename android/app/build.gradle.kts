@@ -35,11 +35,25 @@ android {
         }
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
+    // Building the JNI bridge needs libnode.so, which takes a couple of hours to
+    // cross-compile. Someone working on the UI should not have to wait for it,
+    // so -Psenderrr.skipNativeRuntime=true leaves it out. The resulting APK
+    // installs and runs, and tells the client its server runtime is missing
+    // rather than crashing - NodeRuntime keeps the load failure as a value for
+    // exactly this reason. Never use it for a build anyone will actually run a
+    // server on.
+    if (!project.hasProperty("senderrr.skipNativeRuntime")) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
         }
+    } else {
+        logger.warn(
+            "senderrr.skipNativeRuntime is set: this APK will have NO server " +
+                "runtime in it. UI builds only."
+        )
     }
 
     buildTypes {

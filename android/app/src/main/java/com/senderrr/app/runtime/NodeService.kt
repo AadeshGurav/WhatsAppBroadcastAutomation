@@ -70,17 +70,20 @@ class NodeService : Service() {
 
         moveToState(RuntimeState.Starting, foreground = true)
 
-        if (!NodeRuntime.isAvailable) {
-            fail(getString(R.string.runtime_error_no_library))
-            return
-        }
         acquireWakeLock()
 
-        // Everything below is off the main thread: unpacking the bundle moves
-        // a few hundred megabytes on a first run, and node::Start() then blocks
-        // for the life of the server. The service's looper stays free to handle
-        // a stop intent throughout.
+        // Everything below is off the main thread. Touching NodeRuntime loads
+        // libnode.so, which is around a hundred megabytes of relocations;
+        // unpacking the bundle moves a few hundred more on a first run; and
+        // node::Start() then blocks for the life of the server. Any one of
+        // those on the looper is an ANR, so the looper does none of them and
+        // stays free to handle a stop intent throughout.
         thread(name = "senderrr-node", isDaemon = false) {
+            if (!NodeRuntime.isAvailable) {
+                fail(getString(R.string.runtime_error_no_library))
+                return@thread
+            }
+
             val installation = BundleInstaller(this).install()
             if (installation is BundleInstaller.Result.Failed) {
                 fail(installation.reason)
@@ -93,9 +96,11 @@ class NodeService : Service() {
 
             val exitCode = try {
                 moveToState(RuntimeState.Running)
+                bundle.logFile.parentFile?.mkdirs()
                 NodeRuntime.runScript(
                     scriptPath = bundle.entryPoint.absolutePath,
                     workingDirectory = bundle.workingDirectory.absolutePath,
+                    logFile = bundle.logFile.absolutePath,
                 )
             } catch (error: Throwable) {
                 Log.e(TAG, "The Node runtime stopped with an error.", error)
