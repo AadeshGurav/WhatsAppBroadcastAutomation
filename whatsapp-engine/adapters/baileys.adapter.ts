@@ -11,6 +11,8 @@ import makeWASocket, {
   WASocket,
   GroupMetadata,
   NewsletterMetadata,
+  WAUrlInfo,
+  prepareWAMessageMedia,
 } from 'baileys';
 import {
   IWhatsAppEngine,
@@ -139,6 +141,11 @@ export class BaileysAdapter extends EventEmitter implements IWhatsAppEngine {
   private readonly channelMessageCache = new BoundedCache<string, ChannelMessage[]>(200);
   private readonly statusCache = new BoundedCache<string, Status>(500);
   private readonly groupMetadataCache = new BoundedCache<string, GroupMetadata>(500);
+  // Populated by warmUpLinkPreview(), consumed (once) by the next
+  // sendTextMessage() whose text contains the same URL — see that method's
+  // comment for why this exists instead of Baileys' own auto-fetch.
+  private readonly linkPreviewCache = new BoundedCache<string, { urlInfo: WAUrlInfo; expiresAt: number }>(50);
+  private static readonly LINK_PREVIEW_CACHE_TTL_MS = 5 * 60 * 1000;
 
   constructor(
     private readonly config: BaileysConfig,
@@ -499,12 +506,115 @@ export class BaileysAdapter extends EventEmitter implements IWhatsAppEngine {
 
   async sendTextMessage(chatId: string, text: string, options?: { linkPreview?: boolean }): Promise<MessageResult> {
     const sock = this.ensureReady();
-    // Baileys generates its own link previews when linkPreview isn't
-    // explicitly disabled; there is no wwebjs-style warmUpLinkPreview()
-    // workaround to wire up here (see the interface's optional method).
-    const content: AnyMessageContent = { text, linkPreview: options?.linkPreview === false ? null : undefined };
+    let linkPreview: WAUrlInfo | null | undefined;
+    if (options?.linkPreview === false) {
+      // Explicitly disabled — `null` (not `undefined`) tells Baileys to skip
+      // link-preview generation entirely rather than falling back to its own
+      // fetch. See generateLinkPreviewIfRequired in baileys/lib/Utils/messages.js.
+      linkPreview = null;
+    } else {
+      // If automation.service.ts called warmUpLinkPreview() for a URL in
+      // this text, consume that pre-fetched preview and hand it to Baileys
+      // directly. If not, leave `linkPreview` undefined so Baileys falls
+      // back to its own auto-fetch (Utils/link-preview.js's getUrlInfo) —
+      // exactly as before this method existed.
+      linkPreview = this.consumeWarmedLinkPreview(text);
+    }
+    const content: AnyMessageContent = { text, linkPreview };
     const msg = await sock.sendMessage(toBaileysJid(chatId), content);
     return this.toResult(msg);
+  }
+
+  /**
+   * Baileys-native equivalent of wwebjs's CDP-based link-preview injection.
+   *
+   * wwebjs has no way to hand WhatsApp Web pre-fetched preview data — the
+   * legacy protocol only lets the *server* crawl a URL and generate the
+   * preview, so wwebjs has to monkey-patch the page's crawler function
+   * (WAWebLinkPreviewChatAction.getLinkPreview) to return our data instead
+   * of letting it fail against a WAF or a Unicode filename.
+   *
+   * Baileys' multi-device protocol works the other way: the *sending
+   * device* generates the preview and embeds it directly in the message
+   * (AnyRegularMessageContent's `linkPreview?: WAUrlInfo | null`), so there
+   * is no page to patch and no server-side crawl to race — we just build
+   * the WAUrlInfo ourselves from the same pre-fetched data
+   * automation.service.ts already produces via BrowserFetchUtil's WAF-bypass
+   * pipeline, and hand it straight to sendMessage(). This also means
+   * Baileys never makes its own network request for the article or its
+   * image, so the same WAF/Unicode-filename failures the wwebjs fallback
+   * exists to work around don't apply here in the first place.
+   *
+   * Cached by URL and consumed once by the next sendTextMessage() call
+   * whose text contains that URL (mirroring wwebjs's "warm up, then send"
+   * usage from automation.service.ts); entries expire after
+   * LINK_PREVIEW_CACHE_TTL_MS so a warm-up that's never followed by a send
+   * doesn't linger.
+   */
+  async warmUpLinkPreview(
+    url: string,
+    previewData: {
+      title: string;
+      description: string;
+      pageHtml?: string;
+      imageUrl?: string;
+      jpegThumbnailBase64?: string;
+      thumbnailWidth?: number;
+      thumbnailHeight?: number;
+    },
+  ): Promise<void> {
+    const sock = this.ensureReady();
+
+    const urlInfo: WAUrlInfo = {
+      'canonical-url': url,
+      'matched-text': url,
+      title: previewData.title,
+      description: previewData.description,
+      originalThumbnailUrl: previewData.imageUrl,
+    };
+
+    if (previewData.jpegThumbnailBase64) {
+      try {
+        const imageBuffer = Buffer.from(previewData.jpegThumbnailBase64, 'base64');
+        // Upload the bytes automation.service.ts already fetched (via its
+        // WAF-bypass pipeline) to WA's media CDN ourselves — this is what
+        // turns the preview into a rich, clickable banner (highQualityThumbnail)
+        // instead of just a tiny inline blob (jpegThumbnail alone), matching
+        // the wwebjs native-crawler-quality result. Passing a Buffer (not a
+        // URL) means Baileys never fetches the image itself.
+        const { imageMessage } = await prepareWAMessageMedia(
+          { image: imageBuffer },
+          {
+            upload: sock.waUploadToServer,
+            mediaTypeOverride: 'thumbnail-link',
+            logger: new BaileysLoggerAdapter(this.logger),
+          },
+        );
+        urlInfo.highQualityThumbnail = imageMessage ?? undefined;
+        urlInfo.jpegThumbnail = imageBuffer;
+      } catch (err) {
+        this.logger.warn(
+          `[warmUpLinkPreview] thumbnail upload failed for ${url}, continuing with a text-only preview: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    this.linkPreviewCache.set(url, {
+      urlInfo,
+      expiresAt: Date.now() + BaileysAdapter.LINK_PREVIEW_CACHE_TTL_MS,
+    });
+  }
+
+  /** One-shot read of a warmUpLinkPreview() result for the first URL found in `text`. */
+  private consumeWarmedLinkPreview(text: string): WAUrlInfo | undefined {
+    const urlMatch = text.match(/https?:\/\/[^\s]+/);
+    if (!urlMatch) return undefined;
+    const url = urlMatch[0];
+    const cached = this.linkPreviewCache.get(url);
+    if (!cached) return undefined;
+    this.linkPreviewCache.delete(url);
+    if (Date.now() > cached.expiresAt) return undefined;
+    return cached.urlInfo;
   }
 
   async sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
